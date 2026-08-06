@@ -1,0 +1,47 @@
+# Fastlane — automação de build/release para iOS e Android.
+#
+# Este arquivo é um ESQUELETO. Antes de rodar de verdade você precisa:
+#   1. `gem install fastlane` (ou `brew install fastlane` no Mac)
+#   2. Rodar `fastlane init` dentro de mobile/android e mobile/ios depois de
+#      gerar essas pastas (veja mobile/README.md passo 2)
+#   3. Configurar os secrets abaixo como variáveis de ambiente / GitHub Secrets:
+#      - ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS
+#      - APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_CONTENT
+#      - MATCH_PASSWORD (se usar fastlane match para gerenciar certificados iOS)
+
+default_platform(:android)
+
+platform :android do
+  desc "Build de release (AAB) para o Google Play"
+  lane :release do
+    gradle(
+      task: "bundle",
+      build_type: "Release",
+      project_dir: "../mobile/android"
+    )
+  end
+
+  desc "Envia o AAB mais recente para a faixa 'internal' do Play Console"
+  lane :deploy_internal do
+    upload_to_play_store(
+      track: "internal",
+      aab: "../mobile/build/app/outputs/bundle/release/app-release.aab"
+    )
+  end
+end
+
+platform :ios do
+  desc "Build de release (IPA) para a App Store"
+  lane :release do
+    build_app(
+      workspace: "../mobile/ios/Runner.xcworkspace",
+      scheme: "Runner",
+      export_method: "app-store"
+    )
+  end
+
+  desc "Envia o build mais recente para o TestFlight"
+  lane :deploy_testflight do
+    upload_to_testflight(skip_waiting_for_build_processing: true)
+  end
+end

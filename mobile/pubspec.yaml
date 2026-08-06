@@ -1,0 +1,58 @@
+name: salabim
+description: "Salabim — identifique qualquer música ouvindo, cantarolando, assobiando ou descrevendo."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Estado
+  flutter_riverpod: ^2.5.1
+
+  # Rede
+  dio: ^5.5.0+1
+
+  # Áudio: gravação (modo ouvir/cantarolar) e reprodução (preview do resultado)
+  record: ^5.1.2
+  just_audio: ^0.9.40
+  permission_handler: ^11.3.1
+  path_provider: ^2.1.4
+
+  # UI
+  lottie: ^3.1.2
+  google_fonts: ^6.2.1
+  cached_network_image: ^3.4.1
+  shimmer: ^3.0.0
+
+  # Navegação
+  go_router: ^14.2.7
+
+  # Links externos (abrir apps de streaming)
+  url_launcher: ^6.3.0
+
+  # Persistência local (histórico offline / token de sessão)
+  shared_preferences: ^2.3.2
+
+  # Utilidades
+  intl: ^0.19.0
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+    - assets/lottie/

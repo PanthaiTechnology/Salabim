@@ -1,0 +1,35 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://salabim:salabim@db:5432/salabim
+      REDIS_URL: redis://cache:6379/0
+    depends_on:
+      - db
+      - cache
+    volumes:
+      - ./app:/srv/app
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: salabim
+      POSTGRES_PASSWORD: salabim
+      POSTGRES_DB: salabim
+    ports:
+      - "5432:5432"
+    volumes:
+      - salabim_pg_data:/var/lib/postgresql/data
+
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  salabim_pg_data:

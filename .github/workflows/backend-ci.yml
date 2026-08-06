@@ -1,0 +1,64 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+  pull_request:
+    paths: ["backend/**"]
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: salabim
+          POSTGRES_PASSWORD: salabim
+          POSTGRES_DB: salabim
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - run: ruff check app || true # lint informativo; trocar por "fail" quando o time estiver alinhado no estilo
+
+      - name: Testes
+        env:
+          DATABASE_URL: postgresql+asyncpg://salabim:salabim@localhost:5432/salabim
+          REDIS_URL: redis://localhost:6379/0
+        run: pytest -v
+
+  build-image:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build imagem (sem push — configure registry/secrets antes de habilitar push)
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: salabim-api:${{ github.sha }}

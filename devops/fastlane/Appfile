@@ -1,0 +1,9 @@
+# Preencher com os identificadores reais antes de usar o Fastlane.
+
+app_identifier("com.salabim.app")       # bundle id / application id — deve ser igual em iOS e Android
+apple_id("SEU_EMAIL_APPLE_DEVELOPER")   # conta do Apple Developer Program
+itc_team_id("SEU_TEAM_ID")              # App Store Connect
+team_id("SEU_TEAM_ID")                  # Apple Developer
+
+json_key_file("path/to/google-play-service-account.json") # ver STORE_PUBLISHING.md
+package_name("com.salabim.app")
