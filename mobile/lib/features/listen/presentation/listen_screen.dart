@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../data/models/track.dart';
 import '../../../state/app_providers.dart';
 import 'widgets/mode_selector.dart';
 import 'widgets/pulse_button.dart';
 
-/// Tela principal — o coração do Salabim: um único botão que serve tanto para
-/// "ouvir a música tocando" (Shazam) quanto para "cantarolar/assobiar/cantar"
-/// (Hum to Search), alternado pelo ModeSelector acima do botão.
+/// Tela principal — o coração do Salabim: um único toque começa a escutar
+/// e já busca em tempo real, em segmentos curtos, sem precisar de um
+/// segundo toque para "parar e buscar". O resultado aparece assim que
+/// qualquer segmento bater. Serve tanto para "ouvir a música tocando"
+/// (Shazam) quanto para "cantarolar/assobiar/cantar" (Hum to Search),
+/// alternado pelo ModeSelector acima do botão.
 class ListenScreen extends ConsumerWidget {
   const ListenScreen({super.key});
 
@@ -33,11 +37,13 @@ class ListenScreen extends ConsumerWidget {
     });
 
     final statusLabel = switch (state.status) {
-      ListenStatus.idle => state.mode.label == 'Ouvir música'
+      ListenStatus.idle => state.mode == ListenMode.listen
           ? 'Toca para identificar a música'
           : 'Toca e cantarole, assobie ou cante',
-      ListenStatus.recording => 'Escutando...',
-      ListenStatus.identifying => 'Identificando...',
+      // A busca já acontece automaticamente a cada poucos segundos, sem
+      // precisar tocar de novo — o número de tentativa é só pra dar
+      // feedback de que o app continua tentando.
+      ListenStatus.recording => 'Ouvindo e buscando... (tentativa ${state.attempt + 1})',
       ListenStatus.notFound => 'Não encontramos essa música',
       ListenStatus.error => 'Algo deu errado',
     };
@@ -60,18 +66,27 @@ class ListenScreen extends ConsumerWidget {
         PulseButton(
           mode: state.mode,
           isRecording: state.status == ListenStatus.recording,
-          isProcessing: state.status == ListenStatus.identifying,
+          isProcessing: false,
           amplitude: state.amplitude,
           onTap: () {
             if (state.status == ListenStatus.recording) {
-              controller.stopAndIdentify();
-            } else if (state.status == ListenStatus.idle || state.status == ListenStatus.notFound || state.status == ListenStatus.error) {
+              // Cancela antes da hora — a busca em si já acontece sozinha
+              // enquanto grava, não é preciso tocar pra "buscar".
+              controller.cancel();
+            } else {
               controller.startListening();
             }
           },
         ),
         const SizedBox(height: 24),
         Text(statusLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 15)),
+        if (state.status == ListenStatus.recording) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'toca de novo pra cancelar',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          ),
+        ],
         const Spacer(flex: 2),
       ],
     );
