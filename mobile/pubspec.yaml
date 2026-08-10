@@ -18,7 +18,10 @@ dependencies:
   dio: ^5.5.0+1
 
   # Áudio: gravação (modo ouvir/cantarolar) e reprodução (preview do resultado)
-  record: ^5.1.2
+  # ^5.1.2 resolvia record_linux/record_platform_interface em versões
+  # incompatíveis entre si (bug do próprio pacote, não do nosso código) e
+  # quebrava a compilação Android com "missing implementations for startStream".
+  record: ^7.0.0
   just_audio: ^0.9.40
   permission_handler: ^11.3.1
   path_provider: ^2.1.4
