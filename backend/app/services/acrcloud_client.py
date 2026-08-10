@@ -28,8 +28,11 @@ class ACRCloudResult:
 
 
 def _build_signature(access_key: str, access_secret: str, timestamp: str) -> str:
+    # Validado manualmente contra a API real: o path correto é "/v1/identify"
+    # (sem o prefixo "/api") — usar "/api/v1/identify" aqui OU na URL da request
+    # retorna 404 puro do openresty, sem chegar a autenticar.
     string_to_sign = "\n".join(
-        ["POST", "/api/v1/identify", access_key, "humming", "1", timestamp]
+        ["POST", "/v1/identify", access_key, "humming", "1", timestamp]
     )
     signature = base64.b64encode(
         hmac.new(access_secret.encode(), string_to_sign.encode(), hashlib.sha1).digest()
@@ -55,7 +58,7 @@ async def identify_humming(audio_bytes: bytes, filename: str = "hum.wav") -> ACR
         "signature_version": "1",
     }
 
-    url = f"https://{settings.acrcloud_host}/api/v1/identify"
+    url = f"https://{settings.acrcloud_host}/v1/identify"
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.post(url, data=data, files={"sample": (filename, audio_bytes)})
         response.raise_for_status()
