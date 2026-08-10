@@ -38,6 +38,11 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             matched_provider="audd",
             match_confidence=1.0,
         )
+        track.platform_links = await odesli_client.resolve_platform_links(
+            isrc=track.isrc, source_url=result.source_url
+        )
+        await set_cached_json(cache_key, track.model_dump())
+        return track
     else:  # hum
         result = await acrcloud_client.identify_humming(audio_bytes)
         if not result:

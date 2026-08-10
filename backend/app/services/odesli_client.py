@@ -35,11 +35,12 @@ async def resolve_platform_links(*, isrc: str | None = None, source_url: str | N
 
     params: dict[str, str] = {}
     if isrc:
+        # Validado manualmente contra a API real: platform="isrc" + type="song"
+        # (não "type=isrc" — isso retorna erro "invalid_entity_type").
         params["songIfSingle"] = "true"
-        params["entityType"] = "song"
         params["id"] = isrc
         params["platform"] = "isrc"
-        params["type"] = "isrc"
+        params["type"] = "song"
     if source_url:
         params = {"url": source_url}
     if settings.odesli_api_key:

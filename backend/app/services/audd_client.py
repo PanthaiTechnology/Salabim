@@ -14,7 +14,8 @@ AUDD_ENDPOINT = "https://api.audd.io/"
 
 class AudDResult:
     def __init__(self, title: str, artist: str, album: str | None, isrc: str | None,
-                 artwork_url: str | None, preview_url: str | None, release_date: str | None):
+                 artwork_url: str | None, preview_url: str | None, release_date: str | None,
+                 source_url: str | None = None):
         self.title = title
         self.artist = artist
         self.album = album
@@ -22,6 +23,11 @@ class AudDResult:
         self.artwork_url = artwork_url
         self.preview_url = preview_url
         self.release_date = release_date
+        # URL (Spotify ou Apple Music) usada para resolver os links cross-platform via
+        # Odesli. Validado manualmente: buscar por URL retorna MAIS plataformas do que
+        # buscar só por ISRC (o índice de ISRC do Odesli não cobre Spotify/Apple de forma
+        # confiável) — ver app/services/odesli_client.py.
+        self.source_url = source_url
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=4))
@@ -56,6 +62,7 @@ async def identify_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> Aud
         artwork_url = spotify["album"]["images"][0]["url"]
 
     preview_url = apple.get("previews", [{}])[0].get("url") if apple.get("previews") else None
+    source_url = spotify.get("external_urls", {}).get("spotify") or apple.get("url")
 
     return AudDResult(
         title=result.get("title", "Desconhecido"),
@@ -65,4 +72,5 @@ async def identify_audio(audio_bytes: bytes, filename: str = "audio.m4a") -> Aud
         artwork_url=artwork_url,
         preview_url=preview_url,
         release_date=result.get("release_date"),
+        source_url=source_url,
     )
