@@ -9,6 +9,8 @@ class PlatformLink {
         platform: json['platform'] as String,
         url: json['url'] as String,
       );
+
+  Map<String, dynamic> toJson() => {'platform': platform, 'url': url};
 }
 
 class Track {
@@ -53,6 +55,20 @@ class Track {
             .map((e) => PlatformLink.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'artist': artist,
+        'album': album,
+        'artwork_url': artworkUrl,
+        'isrc': isrc,
+        'release_date': releaseDate,
+        'preview_url': previewUrl,
+        'matched_provider': matchedProvider,
+        'match_confidence': matchConfidence,
+        'platform_links': platformLinks.map((e) => e.toJson()).toList(),
+      };
 }
 
 /// Os dois modos de captura de áudio que fazem do Salabim um "Shazam + Hum to Search".
@@ -72,4 +88,27 @@ enum TextSearchKind {
   const TextSearchKind(this.apiValue, this.label);
   final String apiValue;
   final String label;
+}
+
+/// Uma música identificada e salva no histórico local do aparelho — não
+/// depende de conta/login (ver HistoryService). `mode` guarda como a busca
+/// foi feita: "listen", "hum", "lyrics" ou "description".
+class HistoryEntry {
+  final Track track;
+  final String mode;
+  final DateTime searchedAt;
+
+  const HistoryEntry({required this.track, required this.mode, required this.searchedAt});
+
+  factory HistoryEntry.fromJson(Map<String, dynamic> json) => HistoryEntry(
+        track: Track.fromJson(json['track'] as Map<String, dynamic>),
+        mode: json['mode'] as String,
+        searchedAt: DateTime.parse(json['searched_at'] as String),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'track': track.toJson(),
+        'mode': mode,
+        'searched_at': searchedAt.toIso8601String(),
+      };
 }

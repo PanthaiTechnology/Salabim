@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/models/track.dart';
 import '../data/services/api_client.dart';
 import '../data/services/audio_recorder_service.dart';
+import '../data/services/history_service.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+
+final historyServiceProvider = Provider<HistoryService>((ref) => HistoryService());
 
 final audioRecorderProvider = Provider<AudioRecorderService>((ref) {
   final service = AudioRecorderService();

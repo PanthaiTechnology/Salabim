@@ -59,6 +59,10 @@ class ApiClient {
     }
   }
 
+  /// Histórico por conta no backend — ainda não usado (o app não tem login
+  /// implementado). O histórico ativo hoje é local, ver HistoryService. Fica
+  /// aqui pronto pra quando existir autenticação de verdade, pra sincronizar
+  /// sem precisar reescrever essa parte.
   Future<List<Track>> getHistory({required String token}) async {
     try {
       final response = await _dio.get(

@@ -1,15 +1,22 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/track.dart';
+import '../../../data/services/history_service.dart';
 import 'widgets/platform_link_tile.dart';
 
 /// Tela de resultado — igual em espírito à do Shazam: capa, título, artista,
 /// player de preview de alguns segundos (SEMPRE via URL oficial do provedor,
 /// nunca um recorte próprio — ver ARCHITECTURE.md §10) e botões para abrir a
 /// faixa direto em cada plataforma de streaming.
+///
+/// Toda vez que essa tela abre, a música é salva no histórico local do
+/// aparelho (ver HistoryService) — cobre tanto o resultado de Ouvir/Cantarolar
+/// quanto o de busca por texto, já que ambos chegam aqui do mesmo jeito.
 class ResultScreen extends StatefulWidget {
   const ResultScreen({super.key, required this.track});
 
@@ -21,7 +28,14 @@ class ResultScreen extends StatefulWidget {
 
 class _ResultScreenState extends State<ResultScreen> {
   final _player = AudioPlayer();
+  final _historyService = HistoryService();
   bool _isPlayingPreview = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_historyService.addEntry(widget.track, widget.track.matchedProvider));
+  }
 
   @override
   void dispose() {
