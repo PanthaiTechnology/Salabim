@@ -79,8 +79,8 @@ class _ResultScreenState extends State<ResultScreen> {
     if (previewUrl == null) return;
 
     if (_isPlayingPreview) {
-      await _player.pause();
       setState(() => _isPlayingPreview = false);
+      await _player.pause();
       return;
     }
 
@@ -91,10 +91,16 @@ class _ResultScreenState extends State<ResultScreen> {
         await _player.setUrl(previewUrl);
         _previewLoaded = true;
       }
-      await _player.play();
+      // NÃO espera o play() aqui: no just_audio, o Future de play() só
+      // resolve quando a reprodução PARA (pausa/termina), não quando
+      // começa. Se esperássemos, o ícone só trocaria pra barrinhas no
+      // toque seguinte — atualiza a UI na hora e deixa o play() rodando
+      // por baixo.
       setState(() => _isPlayingPreview = true);
+      unawaited(_player.play().catchError((_) {}));
     } catch (_) {
       // Sem preview disponível para essa faixa — ok, os links de plataforma continuam funcionando.
+      if (mounted) setState(() => _isPlayingPreview = false);
     }
   }
 
