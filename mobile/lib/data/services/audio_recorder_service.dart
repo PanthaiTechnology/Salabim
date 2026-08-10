@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
@@ -38,11 +39,24 @@ class AudioRecorderService {
       return;
     }
 
-    final dir = await getTemporaryDirectory();
-    final path = '${dir.path}/salabim_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    // aacLc é o codec padrão (Android/iOS, já validado ponta a ponta contra a
+    // AudD/ACRCloud). No navegador o suporte a aacLc é incerto entre
+    // browsers — wav tem suporte garantido no pacote `record` para Web, e é
+    // exatamente o mesmo tipo de arquivo que a stream de amplitude precisa
+    // pra funcionar de verdade. Isso só afeta a demo web; mobile é idêntico
+    // ao original.
+    final dir = kIsWeb ? null : await getTemporaryDirectory();
+    const extension = kIsWeb ? 'wav' : 'm4a';
+    final path = kIsWeb
+        ? 'salabim_${DateTime.now().millisecondsSinceEpoch}.$extension'
+        : '${dir!.path}/salabim_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
     await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 44100, numChannels: 1),
+      const RecordConfig(
+        encoder: kIsWeb ? AudioEncoder.wav : AudioEncoder.aacLc,
+        sampleRate: 44100,
+        numChannels: 1,
+      ),
       path: path,
     );
 
