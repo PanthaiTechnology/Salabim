@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/models/track.dart';
 import '../../../data/services/history_service.dart';
 import 'widgets/platform_link_tile.dart';
+import 'widgets/preview_play_button.dart';
 
 /// Tela de resultado — igual em espírito à do Shazam: capa, título, artista,
 /// player de preview de alguns segundos (SEMPRE via URL oficial do provedor,
@@ -29,16 +30,46 @@ class ResultScreen extends StatefulWidget {
 class _ResultScreenState extends State<ResultScreen> {
   final _player = AudioPlayer();
   final _historyService = HistoryService();
+
   bool _isPlayingPreview = false;
+  bool _previewLoaded = false;
+  Duration _previewPosition = Duration.zero;
+  Duration? _previewDuration;
+
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration?>? _durationSub;
+  StreamSubscription<PlayerState>? _playerStateSub;
 
   @override
   void initState() {
     super.initState();
     unawaited(_historyService.addEntry(widget.track, widget.track.matchedProvider));
+
+    // Assinado uma única vez pra vida da tela — assinar de novo a cada play
+    // (como era antes) ia empilhando listeners duplicados a cada toque.
+    _positionSub = _player.positionStream.listen((position) {
+      if (mounted) setState(() => _previewPosition = position);
+    });
+    _durationSub = _player.durationStream.listen((duration) {
+      if (mounted) setState(() => _previewDuration = duration);
+    });
+    _playerStateSub = _player.playerStateStream.listen((playerState) async {
+      if (!mounted) return;
+      if (playerState.processingState == ProcessingState.completed) {
+        await _player.seek(Duration.zero);
+        setState(() {
+          _isPlayingPreview = false;
+          _previewPosition = Duration.zero;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _positionSub?.cancel();
+    _durationSub?.cancel();
+    _playerStateSub?.cancel();
     _player.dispose();
     super.dispose();
   }
@@ -54,14 +85,14 @@ class _ResultScreenState extends State<ResultScreen> {
     }
 
     try {
-      await _player.setUrl(previewUrl);
+      // Só carrega a URL na primeira vez — despausar depois disso continua
+      // de onde parou, em vez de recomeçar o preview do zero.
+      if (!_previewLoaded) {
+        await _player.setUrl(previewUrl);
+        _previewLoaded = true;
+      }
       await _player.play();
       setState(() => _isPlayingPreview = true);
-      _player.playerStateStream.listen((s) {
-        if (s.processingState == ProcessingState.completed && mounted) {
-          setState(() => _isPlayingPreview = false);
-        }
-      });
     } catch (_) {
       // Sem preview disponível para essa faixa — ok, os links de plataforma continuam funcionando.
     }
@@ -70,6 +101,8 @@ class _ResultScreenState extends State<ResultScreen> {
   @override
   Widget build(BuildContext context) {
     final track = widget.track;
+    final durationMs = _previewDuration?.inMilliseconds ?? 0;
+    final progress = durationMs > 0 ? _previewPosition.inMilliseconds / durationMs : 0.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -105,15 +138,10 @@ class _ResultScreenState extends State<ResultScreen> {
             ],
             const SizedBox(height: 20),
             if (track.previewUrl != null)
-              ElevatedButton.icon(
-                onPressed: _togglePreview,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
-                icon: Icon(_isPlayingPreview ? Icons.pause_rounded : Icons.play_arrow_rounded),
-                label: Text(_isPlayingPreview ? 'Pausar prévia' : 'Ouvir prévia'),
+              PreviewPlayButton(
+                isPlaying: _isPlayingPreview,
+                progress: progress,
+                onTap: _togglePreview,
               ),
             const SizedBox(height: 28),
             if (track.platformLinks.isNotEmpty) ...[
