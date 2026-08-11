@@ -38,6 +38,48 @@ async def _enrich_with_itunes(track: Track) -> Track:
     return track
 
 
+def _normalize_name(name: str) -> str:
+    return name.lower().replace("the ", "").strip()
+
+
+async def _prefer_canonical_version(track: Track) -> Track:
+    """Busca por melodia (ACRCloud) às vezes acerta a MÚSICA mas bate numa
+    gravação obscura/cover em vez do original (validado com "Every Breath You
+    Take": o catálogo tinha 3 gravações diferentes da mesma música entre os
+    candidatos, e o cover tinha score mais alto que o original do The Police).
+
+    Detecta isso comparando com quem aparece como resultado mais relevante do
+    iTunes pra esse TÍTULO sozinho (sem o artista que o ACRCloud achou) — se
+    for um artista diferente, troca pra essa versão mais popular/mainstream.
+    Só usado no modo Cantar; fingerprint de áudio (Ouvir/AudD) já casa a
+    gravação exata, não tem essa ambiguidade.
+    """
+    canonical = await itunes_client.search_by_title_only(track.title)
+    if canonical is None:
+        return track
+
+    if _normalize_name(canonical.artist) == _normalize_name(track.artist):
+        return track  # já é a versão canônica, nada a trocar
+
+    # Guarda contra o iTunes ter achado um título só remotamente parecido
+    # (busca por texto livre pode ser imprecisa) — exige que um título
+    # contenha o outro depois de normalizado.
+    a, b = track.title.lower().strip(), canonical.title.lower().strip()
+    if a not in b and b not in a:
+        return track
+
+    track.title = canonical.title
+    track.artist = canonical.artist
+    track.album = canonical.album
+    track.artwork_url = canonical.artwork_url
+    track.preview_url = canonical.preview_url
+    track.isrc = None  # não temos o ISRC dessa versão específica
+    track.id = _stable_track_id(track.isrc, track.title, track.artist)  # recalcula: título/artista mudaram
+    if canonical.track_view_url:
+        track.platform_links = await odesli_client.resolve_platform_links(source_url=canonical.track_view_url)
+    return track
+
+
 async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | None:
     cache_key = audio_fingerprint_key(audio_bytes, mode.value)
     cached = await get_cached_json(cache_key)
@@ -78,9 +120,11 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             matched_provider="acrcloud",
             match_confidence=result.score,
         )
+        track = await _prefer_canonical_version(track)
 
     track = await _enrich_with_itunes(track)
-    track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
+    if not track.platform_links:
+        track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
     await set_cached_json(cache_key, track.model_dump())
     return track
 
