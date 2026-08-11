@@ -1,8 +1,11 @@
 """Ponto de entrada da API do Salabim."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api import routes_health, routes_history, routes_identify, routes_search
 from app.config import get_settings
@@ -27,6 +30,11 @@ app.include_router(routes_health.router)
 app.include_router(routes_identify.router)
 app.include_router(routes_search.router)
 app.include_router(routes_history.router)
+
+# Só ativa se APK_DOWNLOADS_DIR estiver setado no .env — usado pra distribuir
+# o APK de debug pra testers via um túnel, sem precisar de um segundo servidor.
+if settings.apk_downloads_dir and Path(settings.apk_downloads_dir).is_dir():
+    app.mount("/downloads", StaticFiles(directory=settings.apk_downloads_dir), name="downloads")
 
 
 @app.get("/")
