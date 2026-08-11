@@ -35,7 +35,7 @@ class ModeSelector extends StatelessWidget {
                 borderRadius: BorderRadius.circular(26),
               ),
               child: Text(
-                m == ListenMode.listen ? 'Ouvir' : 'Cantarolar',
+                m == ListenMode.listen ? 'Ouvir' : 'Cantar',
                 style: TextStyle(
                   color: selected ? Colors.white : AppColors.textSecondary,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,

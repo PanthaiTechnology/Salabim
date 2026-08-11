@@ -74,7 +74,7 @@ class Track {
 /// Os dois modos de captura de áudio que fazem do Salabim um "Shazam + Hum to Search".
 enum ListenMode {
   listen('listen', 'Ouvir música'),
-  hum('hum', 'Cantarolar / Assobiar');
+  hum('hum', 'Cantar');
 
   const ListenMode(this.apiValue, this.label);
   final String apiValue;

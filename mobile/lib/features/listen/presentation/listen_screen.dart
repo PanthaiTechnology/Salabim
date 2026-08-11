@@ -39,7 +39,7 @@ class ListenScreen extends ConsumerWidget {
     final statusLabel = switch (state.status) {
       ListenStatus.idle => state.mode == ListenMode.listen
           ? 'Toca para identificar a música'
-          : 'Toca e cantarole, assobie ou cante',
+          : 'Cante ou toque o que você lembrar da música',
       // A busca já acontece automaticamente a cada poucos segundos, sem
       // precisar tocar de novo — o número de tentativa é só pra dar
       // feedback de que o app continua tentando.
