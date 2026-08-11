@@ -8,6 +8,8 @@ import asyncio
 import hashlib
 import re
 
+import httpx
+
 from app.core.cache import audio_fingerprint_key, get_cached_json, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
 from app.services import acrcloud_client, audd_client, itunes_client, musixmatch_client, odesli_client, speech_client
@@ -25,22 +27,33 @@ def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
 
 
-def _lyric_overlap_score(title: str, transcription: str) -> float:
-    """Quantas das palavras significativas do título de um candidato aparecem
-    no que foi transcrito da voz do usuário — um proxy simples de "essa
-    música bate com o que a pessoa realmente cantou", sem precisar de uma
-    base de letras completa. Zero se não houver transcrição (ex: melodia
-    cantarolada sem palavras, assobio, instrumento)."""
-    if not transcription:
+def _text_similarity(a: str, b: str) -> float:
+    """Similaridade de Jaccard entre os conjuntos de palavras de dois textos
+    (ignorando stopwords) — usado pra comparar a transcrição do que o
+    usuário cantou com a transcrição do preview oficial de um candidato.
+    """
+    words_a = {w for w in re.findall(r"[\w']+", a.lower()) if w not in _STOPWORDS and len(w) > 2}
+    words_b = {w for w in re.findall(r"[\w']+", b.lower()) if w not in _STOPWORDS and len(w) > 2}
+    if not words_a or not words_b:
         return 0.0
+    return len(words_a & words_b) / len(words_a | words_b)
 
-    words = re.findall(r"[\w']+", title.lower())
-    significant = [w for w in words if w not in _STOPWORDS and len(w) > 2]
-    if not significant:
-        return 0.0
 
-    matches = sum(1 for w in significant if w in transcription)
-    return matches / len(significant)
+async def _transcribe_preview(preview_url: str) -> str:
+    """Baixa o preview oficial de 30s de uma faixa e transcreve — usado como
+    "letra de referência" de um candidato, sem depender de nenhum banco de
+    letras externo (que sempre tem buracos pra faixas menos conhecidas,
+    mesmo licenciadas — testado: nem busca na web achava a letra de uma
+    faixa disponível no Spotify). Falha silenciosa: sem preview, sem sinal
+    extra, mas a busca por melodia continua funcionando sozinha."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(preview_url)
+            response.raise_for_status()
+            audio_bytes = response.content
+        return await speech_client.transcribe(audio_bytes, suffix=".m4a")
+    except Exception:
+        return ""
 
 
 async def _enrich_with_itunes(track: Track) -> Track:
@@ -146,13 +159,29 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         if not candidates:
             return None
 
-        def _combined_score(c: acrcloud_client.ACRCloudResult) -> float:
-            lyric_score = _lyric_overlap_score(c.title, transcription)
-            # Melodia continua o sinal principal (é o que sempre temos);
-            # letra só reforça/corrige quando a pessoa canta palavras reais.
-            return 0.6 * c.score + 0.4 * lyric_score
+        if not transcription:
+            # Sem palavras reconhecíveis (cantarolou/assobiou/tocou sem
+            # letra) — não tem o que validar por texto, fica só a melodia.
+            result = max(candidates, key=lambda c: c.score)
+        else:
+            # Só vale buscar+transcrever preview dos candidatos mais
+            # prováveis pela melodia (limita custo e latência — cada
+            # transcrição extra leva ~1-3s).
+            top_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)[:3]
 
-        result = max(candidates, key=_combined_score)
+            async def _score_candidate(c: acrcloud_client.ACRCloudResult):
+                itunes_hit = await itunes_client.search_by_title_artist(c.title, c.artist)
+                if itunes_hit is None or not itunes_hit.preview_url:
+                    return c, 0.0
+                preview_transcription = await _transcribe_preview(itunes_hit.preview_url)
+                return c, _text_similarity(transcription, preview_transcription)
+
+            scored = await asyncio.gather(*(_score_candidate(c) for c in top_candidates))
+            # Melodia continua o sinal principal (é o que sempre temos);
+            # letra reforça/corrige quando a comparação com o preview oficial
+            # do candidato bate com o que a pessoa realmente cantou.
+            result, _ = max(scored, key=lambda pair: 0.5 * pair[0].score + 0.5 * pair[1])
+
         track = Track(
             id=_stable_track_id(result.isrc, result.title, result.artist),
             title=result.title,
