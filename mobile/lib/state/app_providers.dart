@@ -31,9 +31,7 @@ class ListenState {
 
   const ListenState({
     this.status = ListenStatus.idle,
-    // "Cantar" é o diferencial do Salabim (Hum to Search), por isso é o
-    // modo padrão ao abrir o app — "Ouvir" é a segunda opção.
-    this.mode = ListenMode.hum,
+    this.mode = ListenMode.listen,
     this.amplitude = 0.0,
     this.attempt = 0,
     this.errorMessage,

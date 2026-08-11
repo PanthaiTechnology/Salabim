@@ -13,6 +13,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(Image), findsOneWidget); // logo no topo
-    expect(find.byIcon(Icons.mic_rounded), findsOneWidget); // ícone do modo "Cantar", padrão ao abrir
+    expect(find.byIcon(Icons.hearing_rounded), findsOneWidget); // ícone do modo "Ouvir" por padrão
   });
 }
