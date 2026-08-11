@@ -106,6 +106,42 @@ para músicas muito obscuras ou interpretações muito desafinadas. Musixmatch
 configurado (§9) permitiria uma busca por letra mais completa (não só o
 título) como sinal adicional no futuro.
 
+### 4.2 Sistema de correção/feedback — memória de erros, não "re-treino" da IA
+
+Estudo de caso feito com o usuário (ago/2026) sobre construir um motor de humming
+totalmente próprio (base de fingerprints + modelo de ML treinado do zero): **inviável
+a curto prazo** — o obstáculo maior é jurídico (analisar áudio de faixas de terceiros
+em escala exige licenciamento direto com gravadoras/distribuidoras, não só ter o
+ISRC/UPC), não técnico. Ver decisão registrada nesta seção como referência caso o
+tema volte a ser considerado no futuro.
+
+Caminho intermediário adotado: um sistema de correção que aprende com o uso real,
+sem depender de licenciar catálogo nenhum.
+
+- **Fase 0 (implementada):** usuário marca um resultado do modo Cantar como
+  certo/errado pelo app; se errado, informa o nome real. Isso vira uma correção
+  salva (Redis) e é aplicada automaticamente da próxima vez que o **mesmo** erro
+  específico acontecer.
+- **Fase 1 (implementada):** a busca da correção salva é por **similaridade de
+  texto** (`difflib.SequenceMatcher`, limiar 0.82 combinando 70% título + 30%
+  artista — ver `feedback_service.py`), não por igualdade exata — assim uma
+  correção feita pra "Every Breath You Take (Remastered 2003)" também vale pra
+  variações de sufixo/pontuação do mesmo erro, sem precisar corrigir de novo a
+  cada pequena diferença de nome.
+- **Fase 2 (roadmap — não implementada):** treinar um classificador leve (ex:
+  regressão logística/árvore de decisão, dados tabulares — não é um modelo de
+  áudio) usando como features os sinais que o orquestrador já calcula por busca
+  (score de melodia do ACRCloud, similaridade da transcrição de voz com o preview
+  oficial de cada candidato, quantos candidatos convergem pro mesmo título, se
+  passou pela troca cover→original). O modelo aprenderia os pesos de decisão
+  sozinho a partir de exemplos reais, em vez dos pesos fixos "0.6 melodia / 0.4
+  letra" que o código usa hoje. **Só compensa implementar depois que o app tiver
+  uso real suficiente pra gerar um dataset de correções minimamente
+  representativo** (algumas centenas de exemplos reais, não só testes manuais) —
+  a coleta de dados (Fase 0/1) já está rodando em produção, então quando esse
+  volume existir, a Fase 2 não exige reconstruir nada, só adicionar um script de
+  treino + um passo de inferência no `recognition_service.py`.
+
 ## 5. Fluxo de busca por texto (descrição / letra)
 
 1. `POST /v1/search/text` com `{ query, kind: "lyrics" | "description" }`.
