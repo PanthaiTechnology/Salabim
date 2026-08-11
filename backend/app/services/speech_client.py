@@ -8,7 +8,12 @@ transcrição saiu "Every breath you take, every move you make... I'll be
 watching you", quase idêntica à letra real.
 
 Roda num thread separado (CPU-bound, bloqueante) pra não travar o event
-loop do FastAPI. O modelo é carregado uma vez só e reaproveitado.
+loop do FastAPI. Os modelos são carregados uma vez só e reaproveitados.
+
+Dois tamanhos de modelo: "base" pra transcrever o que o usuário cantou (é o
+sinal principal, vale gastar mais tempo com melhor qualidade), "tiny" pra
+transcrever os previews dos candidatos (é só validação/desempate — mais
+rápido, e não precisa de tanta precisão pra comparar palavras-chave).
 """
 from __future__ import annotations
 
@@ -16,28 +21,25 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-_model = None
-_model_lock = asyncio.Lock()
+_models: dict[str, object] = {}
+_load_lock = asyncio.Lock()
 
 
-async def _get_model():
-    global _model
-    if _model is None:
-        async with _model_lock:
-            if _model is None:  # checa de novo dentro do lock (outra request pode ter carregado)
+async def _get_model(size: str):
+    if size not in _models:
+        async with _load_lock:
+            if size not in _models:  # checa de novo dentro do lock
                 import whisper
 
-                # "base" é um bom equilíbrio entre velocidade (roda em CPU, sem
-                # GPU) e qualidade pra clipes curtos de ~15s.
-                _model = await asyncio.to_thread(whisper.load_model, "base")
-    return _model
+                _models[size] = await asyncio.to_thread(whisper.load_model, size)
+    return _models[size]
 
 
-async def transcribe(audio_bytes: bytes, suffix: str = ".wav") -> str:
+async def transcribe(audio_bytes: bytes, suffix: str = ".wav", model_size: str = "base") -> str:
     """Retorna o texto transcrito do áudio, em minúsculas. String vazia se
     não conseguir transcrever nada reconhecível (ex: só melodia sem letra,
     assobio, batida de ritmo)."""
-    model = await _get_model()
+    model = await _get_model(model_size)
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(audio_bytes)

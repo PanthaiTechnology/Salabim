@@ -51,7 +51,10 @@ async def _transcribe_preview(preview_url: str) -> str:
             response = await client.get(preview_url)
             response.raise_for_status()
             audio_bytes = response.content
-        return await speech_client.transcribe(audio_bytes, suffix=".m4a")
+        # "tiny" aqui: isso é só validação/desempate, não o sinal principal —
+        # bem mais rápido que "base", que é o que sobrecarregava a latência
+        # total (cada transcrição extra levava vários segundos).
+        return await speech_client.transcribe(audio_bytes, suffix=".m4a", model_size="tiny")
     except Exception:
         return ""
 
@@ -165,9 +168,8 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             result = max(candidates, key=lambda c: c.score)
         else:
             # Só vale buscar+transcrever preview dos candidatos mais
-            # prováveis pela melodia (limita custo e latência — cada
-            # transcrição extra leva ~1-3s).
-            top_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)[:3]
+            # prováveis pela melodia (limita custo e latência).
+            top_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)[:2]
 
             async def _score_candidate(c: acrcloud_client.ACRCloudResult):
                 itunes_hit = await itunes_client.search_by_title_artist(c.title, c.artist)
