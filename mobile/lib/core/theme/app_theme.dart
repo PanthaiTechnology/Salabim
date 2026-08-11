@@ -8,10 +8,10 @@ class AppColors {
 
   static const Color background = Color(0xFF0B0714);
   static const Color surface = Color(0xFF181025);
-  static const Color primary = Color(0xFF7C4DFF); // roxo Salabim
-  static const Color secondary = Color(0xFFC945E3); // magenta-violeta de destaque (modo "cantar")
+  static const Color primary = Color(0xFF7C4DFF); // roxo Salabim (mesmo tom do item selecionado no menu inferior)
+  static const Color secondary = primary; // "cantar" parte do mesmo roxo/lilás, a pedido do usuário
   static const Color accentListen = Color(0xFF7C4DFF);
-  static const Color accentHum = Color(0xFFC945E3);
+  static const Color accentHum = primary;
   static const Color textPrimary = Color(0xFFF5F3FA);
   static const Color textSecondary = Color(0xFFA79FBD);
   static const Color success = Color(0xFF34D399);
@@ -23,10 +23,12 @@ class AppColors {
     end: Alignment.bottomRight,
   );
 
-  // Rosa/magenta -> violeta: continua na família do roxo do app (diferente
-  // do azul-arroxeado do modo "Ouvir"), sem cair pro laranja/vermelho.
+  // Começa no mesmo roxo/lilás do "Ouvir" (e do item selecionado no menu
+  // inferior) e aprofunda pra um roxo mais escuro/saturado — sem virar azul
+  // (isso é a marca do "Ouvir") nem rosa. A diferenciação entre os modos
+  // vem de pra onde cada gradiente vai, não do ponto de partida.
   static const LinearGradient humGradient = LinearGradient(
-    colors: [Color(0xFFFF4DC8), Color(0xFF9A3DFF)],
+    colors: [Color(0xFF7C4DFF), Color(0xFF6023D6)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
