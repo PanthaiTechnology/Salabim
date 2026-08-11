@@ -74,12 +74,14 @@ class ListenController extends StateNotifier<ListenState> {
   /// um contorno melódico confiável — por isso os modos têm durações
   /// diferentes, em vez de um valor único pros dois.
   Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 10) : const Duration(seconds: 4);
+      mode == ListenMode.hum ? const Duration(seconds: 15) : const Duration(seconds: 4);
 
-  /// Quantos trechos tenta no total antes de desistir — mantém o orçamento
-  /// total de escuta parecido entre os modos (~20s), só muda como ele é
-  /// dividido.
-  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 2 : 5;
+  /// Quantos trechos tenta no total antes de desistir. No modo Cantar é só
+  /// 1 tentativa: cortar em pedaços (parar e recomeçar gravação) quebra a
+  /// continuidade da melodia cantada bem no meio, o que prejudica a
+  /// precisão — melhor uma gravação única e contínua (igual recomenda o
+  /// próprio Hum to Search do Google) do que várias fatiadas.
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -107,7 +109,7 @@ class ListenController extends StateNotifier<ListenState> {
     if (!_sessionActive) return;
 
     await _amplitudeSub?.cancel();
-    _amplitudeSub = _recorder.startRecording().listen(
+    _amplitudeSub = _recorder.startRecording(mode: state.mode).listen(
       (amp) {
         if (_sessionActive) state = state.copyWith(amplitude: amp);
       },
