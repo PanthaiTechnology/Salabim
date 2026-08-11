@@ -23,6 +23,11 @@ salabim/
 
 ### 1. Backend
 
+Pré-requisito extra: **ffmpeg** instalado no sistema (não é um pacote pip) —
+usado pela transcrição de voz (Whisper) do modo Cantar. No Windows:
+`winget install Gyan.FFmpeg`. Sem ele, o modo Cantar ainda funciona (a
+transcrição falha silenciosamente e cai de volta pro score de melodia puro).
+
 ```bash
 cd backend
 cp .env.example .env    # depois preencha com suas chaves reais (ver ARCHITECTURE.md §9)

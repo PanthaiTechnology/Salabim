@@ -33,7 +33,7 @@ links, e entrega tudo isso atrás de uma UX única, no estilo Shazam. Esse orque
 | Modo | Como o usuário interage | Motor usado | Observação |
 |---|---|---|---|
 | **Ouvir música tocando** | Segura o botão, o app grava ~8–12s do ambiente | AudD (fingerprint acústico) | Igual ao Shazam clássico |
-| **Cantarolar / Cantar / Assobiar / Tocar instrumento** | Toggle "Hum" antes de gravar | ACRCloud Humming/Singing (busca por melodia) | Equivalente ao Hum to Search do Google |
+| **Cantarolar / Cantar / Assobiar / Tocar instrumento** | Toggle "Hum" antes de gravar | ACRCloud Humming/Singing (melodia) **+ Whisper local (letra transcrita da voz)** combinados | Equivalente ao Hum to Search do Google — ver §4.1 |
 | **Descrever a música** | Campo de texto livre ("aquela música do comercial de carro dos anos 90 com refrão animado") | Backend → busca semântica (embeddings + fallback para API de letras) | Fase 2 — ver §7 |
 | **Trecho da letra** | Digita um pedaço da letra | Musixmatch/Genius (busca textual) | Retorna candidatos, sem necessidade de áudio |
 
@@ -68,7 +68,7 @@ interagir (microfone normal vs. modo "cantarolar", ou texto).
 2. `POST /v1/identify` (multipart: arquivo + `mode=listen|hum`).
 3. Backend valida, gera hash do áudio, checa cache no Redis (evita chamar o
    provedor duas vezes para o mesmo trecho).
-4. Se `mode=listen` → chama AudD; se `mode=hum` → chama ACRCloud Humming.
+4. Se `mode=listen` → chama AudD. Se `mode=hum` → ver §4.1 (combina melodia + letra).
 5. Provedor retorna metadados (título, artista, álbum, ISRC/UPC quando disponível).
 6. Backend chama Odesli com o ISRC (ou o link retornado pelo provedor) e recebe os
    links de todas as plataformas de streaming disponíveis para aquele território.
@@ -77,6 +77,34 @@ interagir (microfone normal vs. modo "cantarolar", ou texto).
 8. App mostra a tela de resultado: capa, título, artista, player de preview,
    botões para Spotify/Apple Music/Deezer/Tidal/YouTube Music, e opção de salvar
    no histórico.
+
+### 4.1 Modo "Cantar" — combinando melodia + letra transcrita
+
+O ACRCloud sozinho tem dois problemas conhecidos (validados com testes reais):
+(a) às vezes acerta a MÚSICA mas bate numa gravação obscura/cover em vez do
+original, e (b) o algoritmo de melodia por si só tem uma taxa de erro real,
+maior que a do fingerprint de áudio tradicional. A resposta a isso é combinar
+sinais independentes, como um humano faz ao reconhecer uma música cantada:
+
+1. Dispara em paralelo: `acrcloud_client.identify_humming_candidates()` (todos
+   os candidatos, não só o melhor) **e** `speech_client.transcribe()` (Whisper,
+   modelo "base", roda local — sem chave/custo, exige `ffmpeg` no sistema).
+2. Cada candidato do ACRCloud recebe um score combinado: `0.6 × score de
+   melodia + 0.4 × sobreposição de palavras entre o título e a transcrição`.
+   Se a pessoa canta palavras reais, isso ajuda a desempatar/corrigir a favor
+   do candidato certo — se ela só cantarola sem letra, a transcrição fica
+   vazia e o ranking cai de volta pro score de melodia puro.
+3. O candidato de maior score combinado passa por `_prefer_canonical_version()`:
+   busca no iTunes só pelo TÍTULO (sem o artista que o ACRCloud achou) — se o
+   artista mais popular pra esse título for diferente, troca pra essa versão
+   (é assim que "Every Breath You Take" por uma cover band vira "Every Breath
+   You Take" do The Police).
+
+**Limite conhecido e aceito:** isso é uma aproximação por combinação de sinais,
+não um modelo de IA treinado como o do Google — não existe garantia de acerto
+para músicas muito obscuras ou interpretações muito desafinadas. Musixmatch
+configurado (§9) permitiria uma busca por letra mais completa (não só o
+título) como sinal adicional no futuro.
 
 ## 5. Fluxo de busca por texto (descrição / letra)
 
