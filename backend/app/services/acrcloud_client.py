@@ -1,9 +1,11 @@
 """Cliente do ACRCloud — busca por Humming/Singing (cantarolar, cantar, assobiar,
 tocar num instrumento). Este é o equivalente ao "Hum to Search" do Google.
 
-Docs: https://docs.acrcloud.com/reference/humming-recognition
 Importante: exige criar um PROJETO DO TIPO "Humming" no console do ACRCloud
-(é diferente do projeto de fingerprint de áudio comum).
+(é diferente do projeto de fingerprint de áudio comum) — é a ACCESS_KEY desse
+projeto que faz o motor de humming ser usado, não nenhum parâmetro da request
+(confirmado com o suporte deles: `data_type` continua sendo "audio", igual ao
+endpoint de fingerprint normal).
 """
 from __future__ import annotations
 
@@ -31,8 +33,13 @@ def _build_signature(access_key: str, access_secret: str, timestamp: str) -> str
     # Validado manualmente contra a API real: o path correto é "/v1/identify"
     # (sem o prefixo "/api") — usar "/api/v1/identify" aqui OU na URL da request
     # retorna 404 puro do openresty, sem chegar a autenticar.
+    #
+    # data_type="audio" (não "humming"!) — confirmado pelo suporte do
+    # ACRCloud: o motor de humming é decidido pelo PROJETO (a access_key),
+    # não por esse parâmetro. Usar "humming" aqui sempre retornava
+    # "No result" mesmo pra músicas óbvias — era esse o bug o tempo todo.
     string_to_sign = "\n".join(
-        ["POST", "/v1/identify", access_key, "humming", "1", timestamp]
+        ["POST", "/v1/identify", access_key, "audio", "1", timestamp]
     )
     signature = base64.b64encode(
         hmac.new(access_secret.encode(), string_to_sign.encode(), hashlib.sha1).digest()
@@ -54,7 +61,7 @@ async def identify_humming(audio_bytes: bytes, filename: str = "hum.wav") -> ACR
         "sample_bytes": str(len(audio_bytes)),
         "timestamp": timestamp,
         "signature": signature,
-        "data_type": "humming",
+        "data_type": "audio",
         "signature_version": "1",
     }
 
@@ -80,5 +87,7 @@ async def identify_humming(audio_bytes: bytes, filename: str = "hum.wav") -> ACR
         artist=artists,
         album=(best.get("album") or {}).get("name"),
         isrc=best.get("external_ids", {}).get("isrc"),
-        score=float(best.get("score", 0)) / 100.0,
+        # Validado contra a API real: o score do humming já vem normalizado
+        # entre 0.0 e 1.0 (ex: 0.96) — não é uma porcentagem 0-100.
+        score=float(best.get("score", 0)),
     )
