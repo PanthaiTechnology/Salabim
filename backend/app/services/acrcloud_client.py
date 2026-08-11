@@ -48,7 +48,13 @@ def _build_signature(access_key: str, access_secret: str, timestamp: str) -> str
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=4))
-async def identify_humming(audio_bytes: bytes, filename: str = "hum.wav") -> ACRCloudResult | None:
+async def identify_humming_candidates(audio_bytes: bytes, filename: str = "hum.wav") -> list[ACRCloudResult]:
+    """Retorna TODOS os candidatos que o ACRCloud encontrou (não só o
+    melhor) — o motor de melodia às vezes acerta a música certa em um
+    candidato que não é o de maior score (ex: cover vs. original), então o
+    orquestrador re-ranqueia usando outros sinais (letra transcrita da voz,
+    canonicidade) antes de decidir qual mostrar.
+    """
     settings = get_settings()
     if not (settings.acrcloud_access_key and settings.acrcloud_access_secret):
         raise RuntimeError("ACRCLOUD_ACCESS_KEY/SECRET não configurados — veja backend/.env.example")
@@ -73,21 +79,23 @@ async def identify_humming(audio_bytes: bytes, filename: str = "hum.wav") -> ACR
 
     status_code = payload.get("status", {}).get("code")
     if status_code != 0:
-        return None
+        return []
 
     music = (payload.get("metadata") or {}).get("humming", [])
-    if not music:
-        return None
 
-    best = music[0]
-    artists = ", ".join(a["name"] for a in best.get("artists", [])) or "Desconhecido"
-
-    return ACRCloudResult(
-        title=best.get("title", "Desconhecido"),
-        artist=artists,
-        album=(best.get("album") or {}).get("name"),
-        isrc=best.get("external_ids", {}).get("isrc"),
-        # Validado contra a API real: o score do humming já vem normalizado
-        # entre 0.0 e 1.0 (ex: 0.96) — não é uma porcentagem 0-100.
-        score=float(best.get("score", 0)),
-    )
+    results = []
+    for entry in music:
+        artists = ", ".join(a["name"] for a in entry.get("artists", [])) or "Desconhecido"
+        results.append(
+            ACRCloudResult(
+                title=entry.get("title", "Desconhecido"),
+                artist=artists,
+                album=(entry.get("album") or {}).get("name"),
+                isrc=entry.get("external_ids", {}).get("isrc"),
+                # Validado contra a API real: o score do humming já vem
+                # normalizado entre 0.0 e 1.0 (ex: 0.96) — não é uma
+                # porcentagem 0-100.
+                score=float(entry.get("score", 0)),
+            )
+        )
+    return results

@@ -4,16 +4,43 @@ do Salabim — a "cola" entre Shazam-style e Hum-to-Search-style em um único pr
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import re
 
 from app.core.cache import audio_fingerprint_key, get_cached_json, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
-from app.services import acrcloud_client, audd_client, itunes_client, musixmatch_client, odesli_client
+from app.services import acrcloud_client, audd_client, itunes_client, musixmatch_client, odesli_client, speech_client
+
+# Palavras comuns demais em título de música pra servirem de sinal — em
+# português e inglês, os dois idiomas mais prováveis do usuário/catálogo.
+_STOPWORDS = {
+    "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "é", "em", "um", "uma",
+    "the", "of", "an", "in", "on", "to", "and", "my", "you", "your", "me", "is", "it",
+}
 
 
 def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     basis = isrc or f"{title.lower()}::{artist.lower()}"
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
+
+
+def _lyric_overlap_score(title: str, transcription: str) -> float:
+    """Quantas das palavras significativas do título de um candidato aparecem
+    no que foi transcrito da voz do usuário — um proxy simples de "essa
+    música bate com o que a pessoa realmente cantou", sem precisar de uma
+    base de letras completa. Zero se não houver transcrição (ex: melodia
+    cantarolada sem palavras, assobio, instrumento)."""
+    if not transcription:
+        return 0.0
+
+    words = re.findall(r"[\w']+", title.lower())
+    significant = [w for w in words if w not in _STOPWORDS and len(w) > 2]
+    if not significant:
+        return 0.0
+
+    matches = sum(1 for w in significant if w in transcription)
+    return matches / len(significant)
 
 
 async def _enrich_with_itunes(track: Track) -> Track:
@@ -108,9 +135,24 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         await set_cached_json(cache_key, track.model_dump())
         return track
     else:  # hum
-        result = await acrcloud_client.identify_humming(audio_bytes)
-        if not result:
+        # Melodia (ACRCloud) e letra transcrita da voz (Whisper, local) rodam
+        # em paralelo — são sinais independentes que, combinados, aproximam
+        # bastante do que um humano faz ao reconhecer uma música cantada:
+        # "essa melodia soa parecida" + "essas palavras batem".
+        candidates, transcription = await asyncio.gather(
+            acrcloud_client.identify_humming_candidates(audio_bytes),
+            speech_client.transcribe(audio_bytes),
+        )
+        if not candidates:
             return None
+
+        def _combined_score(c: acrcloud_client.ACRCloudResult) -> float:
+            lyric_score = _lyric_overlap_score(c.title, transcription)
+            # Melodia continua o sinal principal (é o que sempre temos);
+            # letra só reforça/corrige quando a pessoa canta palavras reais.
+            return 0.6 * c.score + 0.4 * lyric_score
+
+        result = max(candidates, key=_combined_score)
         track = Track(
             id=_stable_track_id(result.isrc, result.title, result.artist),
             title=result.title,

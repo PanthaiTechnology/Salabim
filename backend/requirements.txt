@@ -16,3 +16,7 @@ tenacity==9.0.0
 pytest==8.3.3
 pytest-asyncio==0.24.0
 respx==0.21.1
+
+# Transcrição de voz (modo Cantar) — roda local, sem chave/custo. Também
+# exige o binário do ffmpeg instalado no sistema (não é um pacote pip).
+openai-whisper==20250625
