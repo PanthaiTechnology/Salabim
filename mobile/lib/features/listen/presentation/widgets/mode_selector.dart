@@ -21,7 +21,10 @@ class ModeSelector extends StatelessWidget {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: ListenMode.values.map((m) {
+        // Cantar primeiro: é o diferencial do Salabim (Hum to Search), por
+        // isso aparece antes de Ouvir — e também é o modo selecionado por
+        // padrão ao abrir o app (ver ListenState.mode).
+        children: [ListenMode.hum, ListenMode.listen].map((m) {
           final selected = m == mode;
           return GestureDetector(
             onTap: () => onChanged(m),
