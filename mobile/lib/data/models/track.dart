@@ -91,24 +91,60 @@ enum TextSearchKind {
 }
 
 /// Uma música identificada e salva no histórico local do aparelho — não
-/// depende de conta/login (ver HistoryService). `mode` guarda como a busca
-/// foi feita: "listen", "hum", "lyrics" ou "description".
+/// depende de conta/login (ver HistoryService). `mode` guarda qual provedor
+/// bateu essa música ("audd", "acrcloud" ou "musixmatch").
+///
+/// `wasCorrect` guarda o feedback do usuário sobre esse resultado: null =
+/// nunca avaliado, true = confirmou que está certo, false = marcou como
+/// errado (nesse caso `correctedTitle`/`correctedArtist` guardam o nome real
+/// que o usuário informou, se ele informou).
 class HistoryEntry {
   final Track track;
   final String mode;
   final DateTime searchedAt;
+  final bool? wasCorrect;
+  final String? correctedTitle;
+  final String? correctedArtist;
 
-  const HistoryEntry({required this.track, required this.mode, required this.searchedAt});
+  const HistoryEntry({
+    required this.track,
+    required this.mode,
+    required this.searchedAt,
+    this.wasCorrect,
+    this.correctedTitle,
+    this.correctedArtist,
+  });
+
+  /// Título/artista pra exibir na UI — usa a correção do usuário quando ela existir.
+  String get displayTitle => correctedTitle ?? track.title;
+  String get displayArtist => correctedArtist ?? track.artist;
 
   factory HistoryEntry.fromJson(Map<String, dynamic> json) => HistoryEntry(
         track: Track.fromJson(json['track'] as Map<String, dynamic>),
         mode: json['mode'] as String,
         searchedAt: DateTime.parse(json['searched_at'] as String),
+        wasCorrect: json['was_correct'] as bool?,
+        correctedTitle: json['corrected_title'] as String?,
+        correctedArtist: json['corrected_artist'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
         'track': track.toJson(),
         'mode': mode,
         'searched_at': searchedAt.toIso8601String(),
+        'was_correct': wasCorrect,
+        'corrected_title': correctedTitle,
+        'corrected_artist': correctedArtist,
       };
+
+  HistoryEntry copyWith({bool? wasCorrect, String? correctedTitle, String? correctedArtist}) {
+    return HistoryEntry(
+      track: track,
+      mode: mode,
+      searchedAt: searchedAt,
+      wasCorrect: wasCorrect ?? this.wasCorrect,
+      correctedTitle: correctedTitle ?? this.correctedTitle,
+      correctedArtist: correctedArtist ?? this.correctedArtist,
+    );
+  }
 }

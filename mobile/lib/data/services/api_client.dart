@@ -59,6 +59,34 @@ class ApiClient {
     }
   }
 
+  /// Envia feedback sobre um resultado (certo/errado + nome real, se
+  /// informado) — o backend guarda isso e, quando o mesmo erro do modo
+  /// Cantar acontecer de novo, aplica a correção automaticamente. Falha
+  /// silenciosa: o feedback já fica salvo localmente (HistoryService) mesmo
+  /// se o envio pro servidor não funcionar agora.
+  Future<void> submitFeedback({
+    required String matchedTitle,
+    required String matchedArtist,
+    required String mode,
+    required bool wasCorrect,
+    String? correctedTitle,
+    String? correctedArtist,
+  }) async {
+    try {
+      await _dio.post('/v1/feedback', data: {
+        'matched_title': matchedTitle,
+        'matched_artist': matchedArtist,
+        'mode': mode,
+        'was_correct': wasCorrect,
+        'corrected_title': correctedTitle,
+        'corrected_artist': correctedArtist,
+      });
+    } on DioException {
+      // Sem sorte agora — o feedback local (HistoryService) já foi salvo,
+      // que é o que garante a pessoa ver a correção na própria lista dela.
+    }
+  }
+
   /// Histórico por conta no backend — ainda não usado (o app não tem login
   /// implementado). O histórico ativo hoje é local, ver HistoryService. Fica
   /// aqui pronto pra quando existir autenticação de verdade, pra sincronizar

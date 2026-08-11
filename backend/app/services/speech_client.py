@@ -14,6 +14,14 @@ Dois tamanhos de modelo: "base" pra transcrever o que o usuário cantou (é o
 sinal principal, vale gastar mais tempo com melhor qualidade), "tiny" pra
 transcrever os previews dos candidatos (é só validação/desempate — mais
 rápido, e não precisa de tanta precisão pra comparar palavras-chave).
+
+Importante: cada modelo só processa UMA transcrição por vez (lock dedicado
+por tamanho). O código que compara candidatos roda 2 transcrições "tiny" em
+paralelo via asyncio.gather — sem esse lock, isso significa duas threads
+chamando model.transcribe() ao mesmo tempo na MESMA instância do modelo, o
+que derrubou o servidor sem nenhum traceback (crash nativo do PyTorch, não
+um erro Python normal) — Whisper/PyTorch não é garantidamente seguro pra
+inferência concorrente numa única instância de modelo.
 """
 from __future__ import annotations
 
@@ -23,6 +31,7 @@ from pathlib import Path
 
 _models: dict[str, object] = {}
 _load_lock = asyncio.Lock()
+_inference_locks: dict[str, asyncio.Lock] = {}
 
 
 async def _get_model(size: str):
@@ -32,6 +41,7 @@ async def _get_model(size: str):
                 import whisper
 
                 _models[size] = await asyncio.to_thread(whisper.load_model, size)
+                _inference_locks[size] = asyncio.Lock()
     return _models[size]
 
 
@@ -46,7 +56,9 @@ async def transcribe(audio_bytes: bytes, suffix: str = ".wav", model_size: str =
         tmp_path = tmp.name
 
     try:
-        result = await asyncio.to_thread(model.transcribe, tmp_path, fp16=False)
+        # Serializa por tamanho de modelo — ver aviso no docstring do módulo.
+        async with _inference_locks[model_size]:
+            result = await asyncio.to_thread(model.transcribe, tmp_path, fp16=False)
         return (result.get("text") or "").strip().lower()
     except Exception:
         # Transcrição é um sinal complementar — se falhar, a busca por

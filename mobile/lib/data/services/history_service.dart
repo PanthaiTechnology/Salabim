@@ -31,6 +31,11 @@ class HistoryService {
     }
   }
 
+  Future<void> _save(List<HistoryEntry> entries) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_storageKey, jsonEncode(entries.map((e) => e.toJson()).toList()));
+  }
+
   Future<void> addEntry(Track track, String mode) async {
     final entries = await getHistory();
 
@@ -41,9 +46,36 @@ class HistoryService {
     entries.insert(0, HistoryEntry(track: track, mode: mode, searchedAt: DateTime.now()));
 
     final capped = entries.length > _maxEntries ? entries.sublist(0, _maxEntries) : entries;
+    await _save(capped);
+  }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_storageKey, jsonEncode(capped.map((e) => e.toJson()).toList()));
+  /// Remove um ou mais itens do histórico (usado tanto pelo "Excluir"
+  /// individual quanto pela exclusão em lote no modo de seleção múltipla).
+  Future<void> removeEntries(Set<String> trackIds) async {
+    final entries = await getHistory();
+    entries.removeWhere((e) => trackIds.contains(e.track.id));
+    await _save(entries);
+  }
+
+  /// Salva o feedback do usuário sobre um resultado (certo/errado + nome
+  /// real, se ele informou) — fica visível na própria lista do histórico
+  /// mesmo offline, independente de mandar pro backend ter funcionado.
+  Future<void> updateFeedback(
+    String trackId, {
+    required bool wasCorrect,
+    String? correctedTitle,
+    String? correctedArtist,
+  }) async {
+    final entries = await getHistory();
+    final index = entries.indexWhere((e) => e.track.id == trackId);
+    if (index == -1) return;
+
+    entries[index] = entries[index].copyWith(
+      wasCorrect: wasCorrect,
+      correctedTitle: correctedTitle,
+      correctedArtist: correctedArtist,
+    );
+    await _save(entries);
   }
 
   Future<void> clear() async {

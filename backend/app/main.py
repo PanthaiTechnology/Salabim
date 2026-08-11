@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from app.api import routes_health, routes_history, routes_identify, routes_search
+from app.api import routes_feedback, routes_health, routes_history, routes_identify, routes_search
 from app.config import get_settings
 
 settings = get_settings()
@@ -30,6 +30,7 @@ app.include_router(routes_health.router)
 app.include_router(routes_identify.router)
 app.include_router(routes_search.router)
 app.include_router(routes_history.router)
+app.include_router(routes_feedback.router)
 
 # Só ativa se APK_DOWNLOADS_DIR estiver setado no .env — usado pra distribuir
 # o APK de debug pra testers via um túnel, sem precisar de um segundo servidor.

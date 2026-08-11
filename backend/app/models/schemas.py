@@ -59,3 +59,17 @@ class HistoryItem(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     providers: dict[str, bool]
+
+
+class FeedbackRequest(BaseModel):
+    """Feedback do usuário sobre um resultado: confirma se está certo, ou
+    informa o nome real quando está errado. Vira uma correção persistente
+    aplicada automaticamente da próxima vez que o mesmo engano acontecer no
+    modo Cantar — ver app/services/feedback_service.py."""
+
+    matched_title: str
+    matched_artist: str
+    mode: str = Field(..., description="audd | acrcloud | musixmatch — qual motor gerou esse resultado")
+    was_correct: bool
+    corrected_title: str | None = None
+    corrected_artist: str | None = None

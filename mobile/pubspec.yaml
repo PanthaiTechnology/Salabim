@@ -35,8 +35,9 @@ dependencies:
   # Navegação
   go_router: ^14.2.7
 
-  # Links externos (abrir apps de streaming)
+  # Links externos (abrir apps de streaming) e compartilhamento nativo
   url_launcher: ^6.3.0
+  share_plus: ^10.1.2
 
   # Persistência local (histórico offline / token de sessão)
   shared_preferences: ^2.3.2

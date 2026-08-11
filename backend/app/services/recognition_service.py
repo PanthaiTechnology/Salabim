@@ -12,7 +12,15 @@ import httpx
 
 from app.core.cache import audio_fingerprint_key, get_cached_json, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
-from app.services import acrcloud_client, audd_client, itunes_client, musixmatch_client, odesli_client, speech_client
+from app.services import (
+    acrcloud_client,
+    audd_client,
+    feedback_service,
+    itunes_client,
+    musixmatch_client,
+    odesli_client,
+    speech_client,
+)
 
 # Palavras comuns demais em título de música pra servirem de sinal — em
 # português e inglês, os dois idiomas mais prováveis do usuário/catálogo.
@@ -183,6 +191,15 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             # letra reforça/corrige quando a comparação com o preview oficial
             # do candidato bate com o que a pessoa realmente cantou.
             result, _ = max(scored, key=lambda pair: 0.5 * pair[0].score + 0.5 * pair[1])
+
+        # Alguém já corrigiu esse exato resultado errado antes? Aplica a
+        # correção direto, sem precisar rodar o resto do reranking de novo —
+        # é a memória de correções (ver feedback_service.py).
+        correction = await feedback_service.get_correction(result.title, result.artist)
+        if correction:
+            result.title = correction["title"]
+            result.artist = correction["artist"] or result.artist
+            result.isrc = None  # não temos o ISRC da correção manual
 
         track = Track(
             id=_stable_track_id(result.isrc, result.title, result.artist),
