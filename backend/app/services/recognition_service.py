@@ -8,12 +8,34 @@ import hashlib
 
 from app.core.cache import audio_fingerprint_key, get_cached_json, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
-from app.services import acrcloud_client, audd_client, musixmatch_client, odesli_client
+from app.services import acrcloud_client, audd_client, itunes_client, musixmatch_client, odesli_client
 
 
 def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     basis = isrc or f"{title.lower()}::{artist.lower()}"
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
+
+
+async def _enrich_with_itunes(track: Track) -> Track:
+    """Preenche capa e preview quando o provedor que fez o match (ACRCloud,
+    Musixmatch) não retorna isso — só a AudD já vem com essa info de graça.
+    Sem isso, a tela de resultado do modo Cantar/busca por letra ficava sem
+    o botão de preview que o modo Ouvir sempre teve.
+    """
+    if track.artwork_url and track.preview_url:
+        return track
+
+    result = await itunes_client.search_by_title_artist(track.title, track.artist)
+    if result is None:
+        return track
+
+    if not track.artwork_url:
+        track.artwork_url = result.artwork_url
+    if not track.preview_url:
+        track.preview_url = result.preview_url
+    if not track.album:
+        track.album = result.album
+    return track
 
 
 async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | None:
@@ -57,6 +79,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             match_confidence=result.score,
         )
 
+    track = await _enrich_with_itunes(track)
     track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
     await set_cached_json(cache_key, track.model_dump())
     return track
@@ -74,6 +97,7 @@ async def search_by_lyrics(query: str, limit: int = 10) -> list[Track]:
             isrc=hit.isrc,
             matched_provider="musixmatch",
         )
+        track = await _enrich_with_itunes(track)
         track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
         tracks.append(track)
     return tracks
