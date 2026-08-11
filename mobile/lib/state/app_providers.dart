@@ -68,11 +68,18 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Duração de cada trecho gravado e enviado pro backend.
-  static const _segmentDuration = Duration(seconds: 4);
+  /// Duração de cada trecho gravado e enviado pro backend. Fingerprint de
+  /// áudio (Ouvir/AudD) funciona bem com pouco tempo; reconhecimento de
+  /// melodia cantada (Cantar/ACRCloud) precisa de mais contexto pra extrair
+  /// um contorno melódico confiável — por isso os modos têm durações
+  /// diferentes, em vez de um valor único pros dois.
+  Duration _segmentDurationFor(ListenMode mode) =>
+      mode == ListenMode.hum ? const Duration(seconds: 10) : const Duration(seconds: 4);
 
-  /// Quantos trechos tenta no total antes de desistir (~20s de escuta).
-  static const _maxAttempts = 5;
+  /// Quantos trechos tenta no total antes de desistir — mantém o orçamento
+  /// total de escuta parecido entre os modos (~20s), só muda como ele é
+  /// dividido.
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 2 : 5;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -113,7 +120,8 @@ class ListenController extends StateNotifier<ListenState> {
       },
     );
 
-    await Future.delayed(_segmentDuration);
+    final mode = state.mode;
+    await Future.delayed(_segmentDurationFor(mode));
     if (!_sessionActive) return;
 
     final file = await _recorder.stopRecording();
@@ -123,7 +131,7 @@ class ListenController extends StateNotifier<ListenState> {
     // Já dispara a gravação do próximo trecho antes de esperar a resposta
     // do servidor — assim a escuta continua fluida enquanto o trecho
     // anterior é identificado em paralelo, em vez de parar-esperar-parar.
-    final hasMoreAttempts = currentAttempt < _maxAttempts;
+    final hasMoreAttempts = currentAttempt < _maxAttemptsFor(mode);
     if (_sessionActive && hasMoreAttempts) {
       unawaited(_recordAndSearchSegment());
     }
