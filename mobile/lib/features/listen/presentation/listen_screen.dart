@@ -51,15 +51,7 @@ class ListenScreen extends ConsumerWidget {
     return Column(
       children: [
         const SizedBox(height: 24),
-        Text(
-          'Salabim',
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            foreground: Paint()
-              ..shader = AppColors.listenGradient.createShader(const Rect.fromLTWH(0, 0, 160, 40)),
-          ),
-        ),
+        Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
         const Spacer(),
         ModeSelector(mode: state.mode, onChanged: controller.setMode),
         const Spacer(),

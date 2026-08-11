@@ -12,7 +12,7 @@ void main() {
     // infinito (idle pulse), então "settle" nunca aconteceria.
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('Salabim'), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget); // logo no topo
     expect(find.byIcon(Icons.hearing_rounded), findsOneWidget); // ícone do modo "Ouvir" por padrão
   });
 }
