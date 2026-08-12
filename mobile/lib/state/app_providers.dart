@@ -68,20 +68,35 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Duração de cada trecho gravado e enviado pro backend. Fingerprint de
-  /// áudio (Ouvir/AudD) funciona bem com pouco tempo; reconhecimento de
-  /// melodia cantada (Cantar/ACRCloud) precisa de mais contexto pra extrair
-  /// um contorno melódico confiável — por isso os modos têm durações
-  /// diferentes, em vez de um valor único pros dois.
+  /// Duração de cada trecho gravado e enviado pro backend. Cantar usa 7s
+  /// (contexto melódico suficiente pra maioria das identificações) — menos
+  /// que os 15s de antes, de propósito: agora ele tenta identificar a cada
+  /// trecho, não só no final, então o primeiro check acontece bem mais
+  /// cedo.
   Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 15) : const Duration(seconds: 4);
+      mode == ListenMode.hum ? const Duration(seconds: 7) : const Duration(seconds: 4);
 
-  /// Quantos trechos tenta no total antes de desistir. No modo Cantar é só
-  /// 1 tentativa: cortar em pedaços (parar e recomeçar gravação) quebra a
-  /// continuidade da melodia cantada bem no meio, o que prejudica a
-  /// precisão — melhor uma gravação única e contínua (igual recomenda o
-  /// próprio Hum to Search do Google) do que várias fatiadas.
-  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
+  /// Quantos trechos tenta no total antes de desistir. Cantar mudou de 1
+  /// tentativa única (grava tudo, só identifica no final) pra várias
+  /// tentativas menores, igual o Ouvir — prioriza mostrar o resultado assim
+  /// que achar, sem deixar a pessoa cantando à toa depois que a melodia já
+  /// deu pra reconhecer (pedido explícito: "encontrou, mostrou", igual
+  /// Shazam). Cada tentativa nova é uma gravação nova (não uma continuação
+  /// perfeitamente contínua da anterior) — troca uma fatia a mais de
+  /// contexto por tentativa pela resposta mais rápida.
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 3 : 5;
+
+  // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
+  // cantar e depois fica muda por 3s seguidos, entende que ela terminou e
+  // corta a gravação na hora, em vez de ficar girando até os 15s fixos.
+  // Igual um humano perceberia "ah, ela parou". Amplitude normalizada
+  // 0.0-1.0 (ver AudioRecorderService) — 0.15 é um piso conservador acima
+  // de ruído ambiente comum de quarto/rua, sem exigir volume alto.
+  static const _silenceAmplitudeThreshold = 0.15;
+  static const _silenceDurationToStop = Duration(seconds: 3);
+
+  bool _hasDetectedVoice = false;
+  DateTime? _silenceStartedAt;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -108,10 +123,21 @@ class ListenController extends StateNotifier<ListenState> {
   Future<void> _recordAndSearchSegment() async {
     if (!_sessionActive) return;
 
+    _hasDetectedVoice = false;
+    _silenceStartedAt = null;
+    // Sinalizador que a checagem de silêncio completa cedo quando detecta
+    // 3s de silêncio depois de já ter ouvido a pessoa cantando — corrida
+    // contra o timer de duração máxima do trecho, o que vier primeiro.
+    final stopEarly = Completer<void>();
+
     await _amplitudeSub?.cancel();
     _amplitudeSub = _recorder.startRecording(mode: state.mode).listen(
       (amp) {
-        if (_sessionActive) state = state.copyWith(amplitude: amp);
+        if (!_sessionActive) return;
+        state = state.copyWith(amplitude: amp);
+        if (state.mode == ListenMode.hum) {
+          _checkForSilence(amp, stopEarly);
+        }
       },
       onError: (_) {
         _sessionActive = false;
@@ -123,7 +149,10 @@ class ListenController extends StateNotifier<ListenState> {
     );
 
     final mode = state.mode;
-    await Future.delayed(_segmentDurationFor(mode));
+    await Future.any([
+      Future.delayed(_segmentDurationFor(mode)),
+      stopEarly.future,
+    ]);
     if (!_sessionActive) return;
 
     final file = await _recorder.stopRecording();
@@ -165,6 +194,27 @@ class ListenController extends StateNotifier<ListenState> {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
       state = state.copyWith(status: ListenStatus.notFound);
+    }
+  }
+
+  /// Roda a cada nova leitura de amplitude (a cada ~100ms) enquanto grava
+  /// no modo Cantar. Só começa a contar silêncio depois que a pessoa já
+  /// fez algum som acima do piso — silêncio antes de começar a cantar não
+  /// conta (senão cortaria a gravação assim que ela tocasse o botão).
+  void _checkForSilence(double amplitude, Completer<void> stopEarly) {
+    if (stopEarly.isCompleted) return;
+
+    if (amplitude >= _silenceAmplitudeThreshold) {
+      _hasDetectedVoice = true;
+      _silenceStartedAt = null; // ainda fazendo som, zera a contagem
+      return;
+    }
+
+    if (!_hasDetectedVoice) return; // silêncio antes de começar, ignora
+
+    _silenceStartedAt ??= DateTime.now();
+    if (DateTime.now().difference(_silenceStartedAt!) >= _silenceDurationToStop) {
+      stopEarly.complete();
     }
   }
 

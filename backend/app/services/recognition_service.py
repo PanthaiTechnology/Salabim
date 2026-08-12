@@ -314,11 +314,23 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
                 preview_transcription = await _transcribe_preview(itunes_hit.preview_url)
                 return c, _text_similarity(transcription, preview_transcription)
 
-            scored = await asyncio.gather(*(_score_candidate(c) for c in top_candidates))
-            # Melodia continua o sinal principal (é o que sempre temos);
-            # letra reforça/corrige quando a comparação com o preview oficial
-            # do candidato bate com o que a pessoa realmente cantou.
-            result, _ = max(scored, key=lambda pair: 0.5 * pair[0].score + 0.5 * pair[1])
+            # Timeout na etapa toda (não só na transcrição isolada): essa
+            # etapa também busca no iTunes e transcreve até 2 previews —
+            # cada pedaço já tinha proteção própria, mas a soma ainda podia
+            # passar de 40-50s em produção (CPU bem limitada no tier
+            # gratuito). Se estourar, desiste do reforço por letra e usa só
+            # a melodia — sempre temos esse sinal, nunca fica sem resposta.
+            try:
+                scored = await asyncio.wait_for(
+                    asyncio.gather(*(_score_candidate(c) for c in top_candidates)), timeout=20.0
+                )
+                # Melodia continua o sinal principal (é o que sempre temos);
+                # letra reforça/corrige quando a comparação com o preview
+                # oficial do candidato bate com o que a pessoa realmente
+                # cantou.
+                result, _ = max(scored, key=lambda pair: 0.5 * pair[0].score + 0.5 * pair[1])
+            except (TimeoutError, asyncio.TimeoutError):
+                result = max(candidates, key=lambda c: c.score)
 
         # Alguém já corrigiu esse exato resultado errado antes? Aplica a
         # correção direto, sem precisar rodar o resto do reranking de novo —
