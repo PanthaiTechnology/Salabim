@@ -48,39 +48,53 @@ class ListenScreen extends ConsumerWidget {
       ListenStatus.error => 'Algo deu errado',
     };
 
-    return Column(
-      children: [
-        const SizedBox(height: 24),
-        Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
-        const Spacer(),
-        ModeSelector(mode: state.mode, onChanged: controller.setMode),
-        const Spacer(),
-        PulseButton(
-          mode: state.mode,
-          isRecording: state.status == ListenStatus.recording,
-          isProcessing: false,
-          amplitude: state.amplitude,
-          onTap: () {
-            if (state.status == ListenStatus.recording) {
-              // Cancela antes da hora — a busca em si já acontece sozinha
-              // enquanto grava, não é preciso tocar pra "buscar".
-              controller.cancel();
-            } else {
-              controller.startListening();
-            }
-          },
-        ),
-        const SizedBox(height: 24),
-        Text(statusLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 15)),
-        if (state.status == ListenStatus.recording) ...[
-          const SizedBox(height: 4),
-          const Text(
-            'toca de novo pra cancelar',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      // Deslizar pra qualquer lado alterna entre Ouvir/Cantar — além dos
+      // botões do ModeSelector, que continuam funcionando normalmente.
+      // Ignora enquanto grava (mesma regra do ModeSelector/setMode) pra
+      // não trocar de modo no meio de uma escuta em andamento.
+      onHorizontalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        if (velocity.abs() < 150) return; // arrasto fraco/acidental, ignora
+        if (state.status == ListenStatus.recording) return;
+        final next = state.mode == ListenMode.listen ? ListenMode.hum : ListenMode.listen;
+        controller.setMode(next);
+      },
+      child: Column(
+        children: [
+          const SizedBox(height: 24),
+          Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
+          const Spacer(),
+          ModeSelector(mode: state.mode, onChanged: controller.setMode),
+          const Spacer(),
+          PulseButton(
+            mode: state.mode,
+            isRecording: state.status == ListenStatus.recording,
+            isProcessing: false,
+            amplitude: state.amplitude,
+            onTap: () {
+              if (state.status == ListenStatus.recording) {
+                // Cancela antes da hora — a busca em si já acontece sozinha
+                // enquanto grava, não é preciso tocar pra "buscar".
+                controller.cancel();
+              } else {
+                controller.startListening();
+              }
+            },
           ),
+          const SizedBox(height: 24),
+          Text(statusLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 15)),
+          if (state.status == ListenStatus.recording) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'toca de novo pra cancelar',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ],
+          const Spacer(flex: 2),
         ],
-        const Spacer(flex: 2),
-      ],
+      ),
     );
   }
 }
