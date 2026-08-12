@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     odesli_api_key: str = ""
     musixmatch_api_key: str = ""
 
+    # Spotify (Client Credentials — só catálogo público, sem login de
+    # usuário) — usado como reforço quando o Odesli não traz o link do
+    # Spotify pra uma faixa (lacuna real deles, ver spotify_client.py).
+    spotify_client_id: str = ""
+    spotify_client_secret: str = ""
+
     # Infra
     database_url: str = "postgresql+asyncpg://salabim:salabim@localhost:5432/salabim"
     redis_url: str = "redis://localhost:6379/0"
@@ -49,6 +55,7 @@ class Settings(BaseSettings):
             "acrcloud": bool(self.acrcloud_access_key and self.acrcloud_access_secret),
             "odesli": True,  # funciona sem chave em baixo volume
             "musixmatch": bool(self.musixmatch_api_key),
+            "spotify": bool(self.spotify_client_id and self.spotify_client_secret),
         }
 
 

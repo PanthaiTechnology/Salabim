@@ -20,6 +20,7 @@ from app.services import (
     itunes_client,
     odesli_client,
     speech_client,
+    spotify_client,
 )
 
 # Palavras comuns demais em título de música pra servirem de sinal — em
@@ -33,6 +34,25 @@ _STOPWORDS = {
 def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     basis = isrc or f"{title.lower()}::{artist.lower()}"
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
+
+
+async def _resolve_platform_links(
+    title: str, artist: str, *, isrc: str | None = None, source_url: str | None = None
+) -> list[PlatformLink]:
+    """Resolve os links cross-platform via Odesli e, se o Spotify não vier
+    (acontece de verdade: o banco de correspondência cruzada do Odesli tem
+    lacunas — confirmado em produção com "Karma" de Summer Walker, que está
+    lançada no Spotify mas a resposta do Odesli não trazia essa entrada),
+    busca direto na API oficial do Spotify como reforço e coloca em
+    primeiro lugar — é a plataforma mais usada, sempre deve aparecer
+    primeiro quando a faixa estiver disponível lá (pedido explícito do
+    produto, ver docs/api_contract.md)."""
+    links = await odesli_client.resolve_platform_links(isrc=isrc, source_url=source_url)
+    if not any(link.platform == "spotify" for link in links):
+        spotify_url = await spotify_client.search_track_url(title, artist)
+        if spotify_url:
+            links.insert(0, PlatformLink(platform="spotify", url=spotify_url))
+    return links
 
 
 _TRACK_CACHE_TTL = 60 * 60 * 6  # 6h — tempo de sobra pra navegar a busca e abrir um resultado
@@ -66,7 +86,9 @@ async def get_track_details(track_id: str) -> Track | None:
 
     source_url = cached.get("source_url")
     if source_url or track.isrc:
-        track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc, source_url=source_url)
+        track.platform_links = await _resolve_platform_links(
+            track.title, track.artist, isrc=track.isrc, source_url=source_url
+        )
     await _save_track_cache(track, source_url=source_url, links_resolved=True)
     return track
 
@@ -207,7 +229,9 @@ async def _prefer_canonical_version(track: Track) -> Track:
     track.isrc = None  # não temos o ISRC dessa versão específica
     track.id = _stable_track_id(track.isrc, track.title, track.artist)  # recalcula: título/artista mudaram
     if canonical.track_view_url:
-        track.platform_links = await odesli_client.resolve_platform_links(source_url=canonical.track_view_url)
+        track.platform_links = await _resolve_platform_links(
+            track.title, track.artist, source_url=canonical.track_view_url
+        )
     return track
 
 
@@ -233,8 +257,8 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             matched_provider="audd",
             match_confidence=1.0,
         )
-        track.platform_links = await odesli_client.resolve_platform_links(
-            isrc=track.isrc, source_url=result.source_url
+        track.platform_links = await _resolve_platform_links(
+            track.title, track.artist, isrc=track.isrc, source_url=result.source_url
         )
         await set_cached_json(cache_key, track.model_dump())
         await _save_track_cache(track, source_url=result.source_url, links_resolved=True)
@@ -295,7 +319,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
 
     track = await _enrich_with_itunes(track)
     if not track.platform_links:
-        track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
+        track.platform_links = await _resolve_platform_links(track.title, track.artist, isrc=track.isrc)
     await set_cached_json(cache_key, track.model_dump())
     await _save_track_cache(track, source_url=None, links_resolved=True)
     return track

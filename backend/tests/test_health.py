@@ -10,7 +10,7 @@ def test_health_ok():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert set(body["providers"].keys()) == {"audd", "acrcloud", "odesli", "musixmatch"}
+    assert set(body["providers"].keys()) == {"audd", "acrcloud", "odesli", "musixmatch", "spotify"}
 
 
 def test_root():

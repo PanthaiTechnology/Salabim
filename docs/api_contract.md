@@ -37,6 +37,14 @@ Identifica uma música a partir de um trecho de áudio gravado.
 }
 ```
 
+`platform_links` sempre vem com **Spotify primeiro quando disponível** (é a
+plataforma mais usada — pedido explícito do produto), seguido pelas outras
+na ordem que o Odesli retornar. Ver `odesli_client.py` +
+`recognition_service._resolve_platform_links` (usa a API oficial do Spotify
+como reforço quando o Odesli não traz o link — caso real confirmado com
+"Karma" de Summer Walker, onde o Odesli não tinha o Spotify mapeado pra
+aquela faixa mesmo ela estando lançada lá).
+
 **Response 200 (não encontrado):** `{ "found": false, "message": "..." }`
 **Response 429:** limite de requisições excedido (30 req/min por IP, ajustável em `app/core/cache.py`).
 
@@ -96,6 +104,12 @@ Marca uma faixa (já vista em algum resultado) como favorita.
 ## GET /v1/health
 
 ```json
-{ "status": "ok", "providers": { "audd": true, "acrcloud": false, "odesli": true, "musixmatch": true } }
+{ "status": "ok", "providers": { "audd": true, "acrcloud": false, "odesli": true, "musixmatch": true, "spotify": true } }
 ```
 `providers` indica quais integrações têm chave de API configurada no `.env` — útil pra tela de diagnóstico e pro CI.
+`spotify` usa fluxo Client Credentials (busca no catálogo público, sem login
+de usuário) — **requer que a conta Spotify dona do app no Dashboard tenha
+assinatura Premium ativa**, restrição da própria Spotify pra apps nesse
+modo (confirmado em produção: contas gratuitas recebem 403 "Active premium
+subscription required for the owner of the app" mesmo com credenciais
+corretas).
