@@ -57,13 +57,15 @@ def make_feature_graphic() -> None:
     largura e centraliza verticalmente, preenchendo a sobra com o mesmo
     fundo escuro do próprio lockup (sem costura visível)."""
     W, H = 1024, 500
+    MARGIN = 0.72  # a logo ocupa até 72% da largura/altura do canvas — sobra respiro nas bordas
     lockup = Image.open(ICONS_DIR / "salabim_logo_lockup.png").convert("RGBA")
 
-    scale = W / lockup.width
-    new_size = (W, round(lockup.height * scale))
-    if new_size[1] > H:
-        scale = H / lockup.height
-        new_size = (round(lockup.width * scale), H)
+    max_w, max_h = W * MARGIN, H * MARGIN
+    scale = max_w / lockup.width
+    new_size = (round(max_w), round(lockup.height * scale))
+    if new_size[1] > max_h:
+        scale = max_h / lockup.height
+        new_size = (round(lockup.width * scale), round(max_h))
     resized = lockup.resize(new_size, Image.LANCZOS)
 
     canvas = Image.new("RGBA", (W, H), BG)
