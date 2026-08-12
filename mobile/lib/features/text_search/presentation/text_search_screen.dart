@@ -48,6 +48,12 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
     super.initState();
     _initSpeech();
 
+    // Só pra saber quando mostrar/esconder o botão de limpar (o "x" só faz
+    // sentido aparecer quando tem algo digitado pra limpar).
+    _controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+
     _player.positionStream.listen((p) {
       if (mounted) setState(() => _position = p);
     });
@@ -202,6 +208,18 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
               suffixIcon: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (_controller.text.isNotEmpty)
+                    IconButton(
+                      tooltip: 'Limpar',
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () {
+                        setState(() {
+                          _controller.clear();
+                          _results = [];
+                          _error = null;
+                        });
+                      },
+                    ),
                   IconButton(
                     tooltip: _listening ? 'Parar ditado' : 'Falar em vez de digitar',
                     icon: Icon(
