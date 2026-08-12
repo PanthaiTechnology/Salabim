@@ -30,7 +30,7 @@ class Track(BaseModel):
     isrc: str | None = None
     release_date: str | None = None
     preview_url: str | None = Field(None, description="URL de preview OFICIAL (iTunes/Deezer/Spotify), nunca recorte próprio")
-    matched_provider: str = Field(..., description="audd | acrcloud | musixmatch")
+    matched_provider: str = Field(..., description="audd | acrcloud | musixmatch | itunes")
     match_confidence: float | None = None
     platform_links: list[PlatformLink] = []
 

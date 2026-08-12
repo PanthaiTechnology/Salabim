@@ -34,7 +34,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   static const _modeLabels = {
     'audd': 'Ouvida',
     'acrcloud': 'Cantada',
-    'musixmatch': 'Buscada por letra',
+    'itunes': 'Buscada por texto',
   };
 
   @override

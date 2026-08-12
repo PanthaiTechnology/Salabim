@@ -17,7 +17,6 @@ from app.services import (
     audd_client,
     feedback_service,
     itunes_client,
-    musixmatch_client,
     odesli_client,
     speech_client,
 )
@@ -33,6 +32,50 @@ _STOPWORDS = {
 def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     basis = isrc or f"{title.lower()}::{artist.lower()}"
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
+
+
+_spellcheckers: dict[str, object] = {}
+
+
+def _get_spellchecker(lang: str):
+    if lang not in _spellcheckers:
+        from spellchecker import SpellChecker
+
+        _spellcheckers[lang] = SpellChecker(language=lang)
+    return _spellcheckers[lang]
+
+
+def _autocorrect_query(query: str, lang: str) -> str | None:
+    """Corrige palavras com erro de digitação na consulta (dicionário local,
+    sem chave/custo) — cobre erro de ortografia de verdade (ex: "fantasi" ->
+    "fantasy", "pransha" -> "prancha"). Retorna None se nada precisou mudar.
+
+    Limite honesto: isso NÃO corrige uma palavra escrita certa mas errada
+    pro contexto (ex: alguém escreve "reel" quando a letra real é "real" —
+    ambas são palavras válidas, o corretor ortográfico não tem como saber
+    qual é a certa sem uma base de letras completa pra comparar contra, que
+    esbarra no mesmo problema de licenciamento discutido em ARCHITECTURE.md
+    §4.2 — "mondegreen"/palavra parecida trocada continua sendo um limite
+    real, não só de digitação).
+    """
+    checker = _get_spellchecker(lang)
+    words = query.split()
+    corrected = []
+    changed = False
+
+    for word in words:
+        clean = re.sub(r"[^\w]", "", word.lower())
+        if not clean or clean in checker:
+            corrected.append(word)
+            continue
+        suggestion = checker.correction(clean)
+        if suggestion and suggestion != clean:
+            corrected.append(suggestion)
+            changed = True
+        else:
+            corrected.append(word)
+
+    return " ".join(corrected) if changed else None
 
 
 def _text_similarity(a: str, b: str) -> float:
@@ -219,27 +262,92 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
     return track
 
 
-async def search_by_lyrics(query: str, limit: int = 10) -> list[Track]:
-    hits = await musixmatch_client.search_by_lyrics(query, limit=limit)
+async def _search_with_word_dropout(query: str, limit: int) -> list[itunes_client.ItunesTrackMatch]:
+    """Quando a frase completa não acha nada, tenta variações removendo uma
+    palavra de cada vez — cobre o caso de erro de digitação ou palavra
+    trocada/mal-lembrada ("sempre cantei assim") sem precisar de corretor
+    ortográfico: se o resto da frase ainda estiver certo, a busca encontra
+    mesmo com uma palavra errada no meio.
+
+    Roda as variações em paralelo e "vota": faixas que aparecem em mais de
+    uma variação sobem no ranking — sinal de que a palavra removida não era
+    a peça essencial pra identificar a música.
+    """
+    words = query.split()
+    if len(words) < 3:
+        return []
+
+    # No máximo 8 variações — o suficiente pra pegar a maioria dos casos
+    # sem gerar chamadas demais numa frase muito longa.
+    variants = [" ".join(words[:i] + words[i + 1 :]) for i in range(min(len(words), 8))]
+    results = await asyncio.gather(*(itunes_client.search_by_text(v, limit=limit) for v in variants))
+
+    counts: dict[tuple[str, str], int] = {}
+    by_key: dict[tuple[str, str], itunes_client.ItunesTrackMatch] = {}
+    for hits in results:
+        for hit in hits[:3]:  # só os top resultados de cada tentativa contam voto
+            key = (hit.title.lower(), hit.artist.lower())
+            counts[key] = counts.get(key, 0) + 1
+            by_key[key] = hit
+
+    ranked = sorted(by_key.items(), key=lambda kv: counts[kv[0]], reverse=True)
+    return [hit for _, hit in ranked[:limit]]
+
+
+async def search_tracks_by_text(query: str, limit: int = 10) -> list[Track]:
+    """Busca por texto: nome da música, nome do artista, OU qualquer trecho
+    da letra — tudo pelo mesmo campo, via iTunes Search (gratuito, sem
+    chave; Musixmatch não tem mais plano gratuito pra Lyrics API, por isso
+    não é mais o caminho principal — ver ARCHITECTURE.md §5).
+    """
+    hits = await itunes_client.search_by_text(query, limit=limit)
+
+    if not hits:
+        # Tenta corrigir erro de digitação (português e inglês, os idiomas
+        # mais prováveis) antes de recorrer ao fallback mais bruto.
+        for lang in ("pt", "en"):
+            corrected = _autocorrect_query(query, lang)
+            if corrected:
+                hits = await itunes_client.search_by_text(corrected, limit=limit)
+                if hits:
+                    break
+
+    if not hits:
+        hits = await _search_with_word_dropout(query, limit)
+
     tracks: list[Track] = []
+    seen: set[tuple[str, str]] = set()
     for hit in hits:
+        key = (hit.title.lower(), hit.artist.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
         track = Track(
-            id=_stable_track_id(hit.isrc, hit.title, hit.artist),
+            id=_stable_track_id(None, hit.title, hit.artist),
             title=hit.title,
             artist=hit.artist,
             album=hit.album,
-            isrc=hit.isrc,
-            matched_provider="musixmatch",
+            artwork_url=hit.artwork_url,
+            preview_url=hit.preview_url,
+            matched_provider="itunes",
         )
-        track = await _enrich_with_itunes(track)
-        track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
+        if hit.track_view_url:
+            track.platform_links = await odesli_client.resolve_platform_links(source_url=hit.track_view_url)
         tracks.append(track)
     return tracks
 
 
+async def search_by_lyrics(query: str, limit: int = 10) -> list[Track]:
+    return await search_tracks_by_text(query, limit=limit)
+
+
 async def search_by_description(query: str, limit: int = 10) -> list[Track]:
-    """Fase 2 (ver ARCHITECTURE.md §7): busca semântica própria por descrição livre.
-    Placeholder hoje — cai de volta para busca por texto na Musixmatch como aproximação
-    até o índice de embeddings próprio existir.
+    """Descrição livre da música (ex: "aquela música do comercial dos anos
+    90"). Busca semântica de verdade (embeddings) é Fase 2 — ver
+    ARCHITECTURE.md §7. Hoje cai no mesmo caminho de busca por texto: se a
+    descrição incluir um pedaço reconhecível do título/artista/letra, ainda
+    encontra; descrições puramente conceituais (sem nenhuma palavra-chave
+    da música em si) não têm como funcionar sem o índice semântico.
     """
-    return await search_by_lyrics(query, limit=limit)
+    return await search_tracks_by_text(query, limit=limit)

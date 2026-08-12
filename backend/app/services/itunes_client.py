@@ -45,6 +45,19 @@ def _upsize_artwork(url: str | None) -> str | None:
     return url.replace("100x100bb", "600x600bb") if url else None
 
 
+def _parse_hit(hit: dict) -> ItunesTrackMatch | None:
+    if not hit.get("artistName") or not hit.get("trackName"):
+        return None
+    return ItunesTrackMatch(
+        title=hit["trackName"],
+        artist=hit["artistName"],
+        album=hit.get("collectionName"),
+        artwork_url=_upsize_artwork(hit.get("artworkUrl100")),
+        preview_url=hit.get("previewUrl"),
+        track_view_url=hit.get("trackViewUrl"),
+    )
+
+
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=4))
 async def search_by_title_artist(title: str, artist: str) -> ItunesResult | None:
     params = {"term": f"{title} {artist}", "entity": "song", "limit": "1"}
@@ -82,18 +95,23 @@ async def search_by_title_only(title: str) -> ItunesTrackMatch | None:
         payload = response.json()
 
     results = payload.get("results", [])
-    if not results:
-        return None
+    return _parse_hit(results[0]) if results else None
 
-    hit = results[0]
-    if not hit.get("artistName") or not hit.get("trackName"):
-        return None
 
-    return ItunesTrackMatch(
-        title=hit["trackName"],
-        artist=hit["artistName"],
-        album=hit.get("collectionName"),
-        artwork_url=_upsize_artwork(hit.get("artworkUrl100")),
-        preview_url=hit.get("previewUrl"),
-        track_view_url=hit.get("trackViewUrl"),
-    )
+@retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=4))
+async def search_by_text(query: str, limit: int = 10) -> list[ItunesTrackMatch]:
+    """Busca geral por texto — cobre título, artista OU trecho de letra (o
+    índice de busca da Apple casa com bastante coisa além só do título,
+    testado manualmente com trechos de letra que batem certo). Usado como
+    base da busca por texto do app (ver recognition_service.search_tracks_by_text
+    pra tolerância a erro de digitação/palavra trocada).
+    """
+    params = {"term": query, "entity": "song", "limit": str(limit)}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(SEARCH_ENDPOINT, params=params)
+        if response.status_code != 200:
+            return []
+        payload = response.json()
+
+    hits = [_parse_hit(h) for h in payload.get("results", [])]
+    return [h for h in hits if h is not None]
