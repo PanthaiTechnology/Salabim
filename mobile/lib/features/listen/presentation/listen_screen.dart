@@ -23,10 +23,16 @@ class ListenScreen extends ConsumerStatefulWidget {
 }
 
 class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerProviderStateMixin {
-  // Até onde o botão acompanha o dedo antes de travar (sensação de
-  // resistência, em vez de seguir infinitamente) — e o quanto de arrasto
-  // já é suficiente pra confirmar a troca de modo ao soltar.
-  static const _dragMaxOffset = 90.0;
+  // Até aqui o botão segue o dedo quase 1:1 (sem resistência nenhuma).
+  static const _dragFollowRange = 90.0;
+  // Além do alcance livre, só essa fração de cada pixel arrastado ainda
+  // passa pro botão — resistência elástica (vai ficando mais "pesado" aos
+  // poucos) em vez de travar de repente numa parede dura, que era o que
+  // estava parecendo pouco natural. 0.5 = metade da resistência de um
+  // travamento total (que seria não deixar passar nada, ratio 0).
+  static const _dragResistanceRatio = 0.5;
+  // Limite absoluto mesmo com a resistência, só pra não fugir demais da tela.
+  static const _dragHardCap = 150.0;
   static const _commitThreshold = 50.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
   // já no novo modo — dá a sensação de um botão saindo e outro entrando,
@@ -40,9 +46,26 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   Animation<double>? _slideAnimation;
 
   bool _isDragging = false;
-  double _liveDragDx = 0;
+  double _rawDragDx = 0; // acumulado bruto do dedo, sem resistência aplicada
+  double _liveDragDx = 0; // valor exibido, já com a resistência aplicada
 
   double get _buttonOffset => _isDragging ? _liveDragDx : (_slideAnimation?.value ?? 0);
+
+  double _applyDragResistance(double rawDelta) {
+    final sign = rawDelta.isNegative ? -1.0 : 1.0;
+    final magnitude = rawDelta.abs();
+    if (magnitude <= _dragFollowRange) return rawDelta;
+
+    final overshoot = magnitude - _dragFollowRange;
+    final resisted = (_dragFollowRange + overshoot * _dragResistanceRatio).clamp(0.0, _dragHardCap);
+    return sign * resisted;
+  }
+
+  /// Mapeamento fixo, não alternância: não existe um terceiro modo pra ficar
+  /// girando — arrastar pra esquerda sempre aponta pra Cantar, pra direita
+  /// sempre aponta pra Ouvir. Arrastar pro lado que já é o modo atual não
+  /// faz nada (não tem "próximo" modo pra ir).
+  ListenMode _targetModeForDirection(int direction) => direction < 0 ? ListenMode.hum : ListenMode.listen;
 
   @override
   void dispose() {
@@ -58,6 +81,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
 
     setState(() {
       _isDragging = true;
+      _rawDragDx = 0;
       _liveDragDx = 0;
     });
   }
@@ -65,22 +89,26 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   void _onDragUpdate(DragUpdateDetails details) {
     if (!_isDragging) return;
     setState(() {
-      final next = _liveDragDx + details.delta.dx;
-      _liveDragDx = next.clamp(-_dragMaxOffset, _dragMaxOffset);
+      _rawDragDx += details.delta.dx;
+      _liveDragDx = _applyDragResistance(_rawDragDx);
     });
   }
 
   void _onDragEnd(DragEndDetails details) {
     if (!_isDragging) return;
     final velocity = details.primaryVelocity ?? 0;
-    final isRecording = ref.read(listenControllerProvider).status == ListenStatus.recording;
-    final shouldCommit = !isRecording && (_liveDragDx.abs() > _commitThreshold || velocity.abs() > 700);
     final direction = _liveDragDx != 0 ? (_liveDragDx > 0 ? 1 : -1) : (velocity < 0 ? -1 : 1);
+    final targetMode = _targetModeForDirection(direction);
+    final currentMode = ref.read(listenControllerProvider).mode;
+    final isRecording = ref.read(listenControllerProvider).status == ListenStatus.recording;
+
+    final farEnough = _liveDragDx.abs() > _commitThreshold || velocity.abs() > 700;
+    final shouldCommit = !isRecording && farEnough && targetMode != currentMode;
 
     setState(() => _isDragging = false);
 
     if (shouldCommit) {
-      _animateCommit(direction);
+      _animateCommit(direction, targetMode);
     } else {
       _animateSpringBack();
     }
@@ -96,18 +124,16 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   }
 
   /// Arrasto confirmado: termina de "sair" na direção que já estava indo,
-  /// troca o modo no instante em que sai de vista, e reaparece do lado
-  /// oposto deslizando de volta ao centro já com o novo modo.
-  void _animateCommit(int direction) {
+  /// troca pro `targetMode` no instante em que sai de vista, e reaparece do
+  /// lado oposto deslizando de volta ao centro já com o novo modo.
+  void _animateCommit(int direction, ListenMode targetMode) {
     _slideAnimation = Tween<double>(begin: _liveDragDx, end: direction * _exitOffset)
         .chain(CurveTween(curve: Curves.easeIn))
         .animate(_slideController);
 
     _slideController.forward(from: 0).whenComplete(() {
       if (!mounted) return;
-      final controller = ref.read(listenControllerProvider.notifier);
-      final current = ref.read(listenControllerProvider).mode;
-      controller.setMode(current == ListenMode.listen ? ListenMode.hum : ListenMode.listen);
+      ref.read(listenControllerProvider.notifier).setMode(targetMode);
 
       _slideAnimation = Tween<double>(begin: -direction * _exitOffset, end: 0)
           .chain(CurveTween(curve: Curves.easeOutBack))
