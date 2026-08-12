@@ -183,6 +183,19 @@ Watch/widget de tela de bloqueo (iOS) e widget Android.
 identificação em playlists inteiras) via RevenueCat (abstrai StoreKit/Play
 Billing).
 
+**Conta de usuário (opcional, avaliar pós-Internal Testing):** login por
+e-mail e/ou social (Google primeiro — mais simples, sem revisão externa;
+Facebook depois, exige app + revisão no Facebook for Developers; iOS exige
+"Sign in with Apple" se oferecer qualquer login social). Decisão explícita
+do produto (12/ago/2026): **não obrigatório** — o app continua usável sem
+login (mantém a velocidade que é o valor central, igual Shazam/SoundHound,
+que não travam a função principal atrás de cadastro); conta serve pra quem
+quiser sincronizar histórico entre aparelhos. Arquitetura atual já suporta
+isso sem retrabalho: backend é REST sem sessão (só soma `/v1/auth/*`),
+histórico local existente migra pra conta no momento do login. Exige
+reescrever a política de privacidade e o Data Safety (Play Console) pra
+declarar e-mail/identificador de conta quando for implementado.
+
 ## 8. Deploy / Infraestrutura (visão geral, detalhado em `devops/`)
 
 - **Backend:** container único (`backend/Dockerfile`), roda atrás de um load
