@@ -20,7 +20,15 @@ class ApiClient {
             Dio(BaseOptions(
               baseUrl: AppConstants.apiBaseUrl,
               connectTimeout: const Duration(seconds: 10),
-              receiveTimeout: const Duration(seconds: 20),
+              // 75s, não 20s: o backend roda no tier gratuito do Render, que
+              // "dorme" depois de 15min sem uso e pode levar até ~60s pra
+              // acordar na primeira requisição depois disso — com um timeout
+              // curto, toda vez que o servidor tivesse dormindo o app dava
+              // erro ANTES dele terminar de acordar (bug real, encontrado em
+              // teste: primeira busca depois de um tempo parado sempre
+              // falhava com "não foi possível conectar", mesmo o servidor
+              // respondendo normalmente segundos depois).
+              receiveTimeout: const Duration(seconds: 75),
             ));
 
   final Dio _dio;
