@@ -257,6 +257,12 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             matched_provider="audd",
             match_confidence=1.0,
         )
+        # AudD às vezes não traz preview/capa junto (mais comum em faixas
+        # menos conhecidas/regionais) — busca no iTunes como reforço, mesmo
+        # jeito que já era feito pro modo Cantar. Bug real encontrado em
+        # produção: esse enrich só rodava no modo Cantar, então o modo Ouvir
+        # ficava sem botão de preview sempre que a AudD não trazia de graça.
+        track = await _enrich_with_itunes(track)
         track.platform_links = await _resolve_platform_links(
             track.title, track.artist, isrc=track.isrc, source_url=result.source_url
         )
