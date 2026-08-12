@@ -43,5 +43,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Necessário no Android 11+ pro pacote speech_to_text (ditado por
+             voz na busca por texto) conseguir enxergar o serviço de
+             reconhecimento de fala do sistema. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 </manifest>
