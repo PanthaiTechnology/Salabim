@@ -14,6 +14,7 @@ class PreviewPlayButton extends StatelessWidget {
     required this.isPlaying,
     required this.progress,
     required this.onTap,
+    this.size = 64,
   });
 
   final bool isPlaying;
@@ -23,37 +24,44 @@ class PreviewPlayButton extends StatelessWidget {
 
   final VoidCallback onTap;
 
+  /// Diâmetro do botão — 64 na tela de resultado (padrão), menor nas listas
+  /// de busca/histórico pra caber ao lado da capa sem dominar a linha.
+  final double size;
+
   @override
   Widget build(BuildContext context) {
+    final innerSize = size * 0.78;
+    final iconSize = size * 0.41;
+
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        width: 64,
-        height: 64,
+        width: size,
+        height: size,
         child: Stack(
           alignment: Alignment.center,
           children: [
             SizedBox(
-              width: 64,
-              height: 64,
+              width: size,
+              height: size,
               child: CircularProgressIndicator(
                 value: progress.clamp(0.0, 1.0),
-                strokeWidth: 3,
+                strokeWidth: size * 0.047,
                 backgroundColor: AppColors.primary.withValues(alpha: 0.15),
                 valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
               ),
             ),
             Container(
-              width: 50,
-              height: 50,
+              width: innerSize,
+              height: innerSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.primary.withValues(alpha: 0.14),
               ),
               child: Center(
                 child: isPlaying
-                    ? const _AnimatedAudioBars()
-                    : const Icon(Icons.play_arrow_rounded, color: AppColors.primary, size: 26),
+                    ? _AnimatedAudioBars(maxHeight: size * 0.25)
+                    : Icon(Icons.play_arrow_rounded, color: AppColors.primary, size: iconSize),
               ),
             ),
           ],
@@ -66,7 +74,9 @@ class PreviewPlayButton extends StatelessWidget {
 /// Três barrinhas oscilando fora de fase — o mesmo tipo de indicador que
 /// apps de música usam pra dizer "isso está tocando agora".
 class _AnimatedAudioBars extends StatefulWidget {
-  const _AnimatedAudioBars();
+  const _AnimatedAudioBars({required this.maxHeight});
+
+  final double maxHeight;
 
   @override
   State<_AnimatedAudioBars> createState() => _AnimatedAudioBarsState();
@@ -87,7 +97,7 @@ class _AnimatedAudioBarsState extends State<_AnimatedAudioBars> with SingleTicke
   @override
   Widget build(BuildContext context) {
     const barCount = 3;
-    const maxHeight = 16.0;
+    final maxHeight = widget.maxHeight;
     const minHeightFactor = 0.3;
 
     return AnimatedBuilder(

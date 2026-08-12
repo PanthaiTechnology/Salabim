@@ -1,15 +1,21 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/track.dart';
 import '../../../data/services/api_client.dart';
+import '../../history/presentation/widgets/artwork_thumbnail.dart';
+import '../../result/presentation/widgets/preview_play_button.dart';
 
 /// Busca por trecho de letra ou por descrição livre ("aquela música do
 /// comercial dos anos 90...") — o terceiro jeito de achar uma música no Salabim,
 /// sem precisar de áudio nenhum. Tem um microfone de ditado ao lado da lupa
-/// pra quem preferir falar em vez de digitar.
+/// pra quem preferir falar em vez de digitar, e cada resultado mostra a
+/// capa real + um botão de preview (mesmo visual das telas de Ouvir/Cantar).
 class TextSearchScreen extends StatefulWidget {
   const TextSearchScreen({super.key});
 
@@ -21,6 +27,7 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
   final _controller = TextEditingController();
   final _api = ApiClient();
   final _speech = stt.SpeechToText();
+  final _player = AudioPlayer();
 
   TextSearchKind _kind = TextSearchKind.lyrics;
   List<Track> _results = [];
@@ -29,10 +36,35 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
   bool _speechAvailable = false;
   String? _error;
 
+  // Só uma prévia toca por vez na lista — controlado aqui em vez de por
+  // item, pra trocar de faixa automaticamente parar a anterior.
+  String? _playingTrackId;
+  bool _isPlaying = false;
+  Duration _position = Duration.zero;
+  Duration? _duration;
+
   @override
   void initState() {
     super.initState();
     _initSpeech();
+
+    _player.positionStream.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+    _player.durationStream.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _player.playerStateStream.listen((s) async {
+      if (!mounted) return;
+      if (s.processingState == ProcessingState.completed) {
+        await _player.stop();
+        setState(() {
+          _playingTrackId = null;
+          _isPlaying = false;
+          _position = Duration.zero;
+        });
+      }
+    });
   }
 
   Future<void> _initSpeech() async {
@@ -68,8 +100,6 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
     await _speech.listen(
       listenOptions: stt.SpeechListenOptions(localeId: 'pt_BR', partialResults: true),
       onResult: (result) {
-        // Preenche a caixa de texto em tempo real conforme reconhece —
-        // continua até a pessoa parar de falar (resultado final).
         setState(() => _controller.text = result.recognizedWords);
         if (result.finalResult) {
           setState(() => _listening = false);
@@ -79,9 +109,46 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
     );
   }
 
+  Future<void> _togglePreview(Track track) async {
+    final previewUrl = track.previewUrl;
+    if (previewUrl == null) return;
+
+    if (_playingTrackId == track.id) {
+      // Mesma faixa já carregada — só alterna play/pause.
+      if (_isPlaying) {
+        setState(() => _isPlaying = false);
+        await _player.pause();
+      } else {
+        setState(() => _isPlaying = true);
+        unawaited(_player.play().catchError((_) {}));
+      }
+      return;
+    }
+
+    // Trocando de faixa: para a anterior e carrega a nova do zero.
+    setState(() {
+      _playingTrackId = track.id;
+      _isPlaying = true;
+      _position = Duration.zero;
+      _duration = null;
+    });
+    try {
+      await _player.setUrl(previewUrl);
+      unawaited(_player.play().catchError((_) {}));
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _playingTrackId = null;
+          _isPlaying = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
     _speech.stop();
+    _player.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -156,11 +223,33 @@ class _TextSearchScreenState extends State<TextSearchScreen> {
               itemCount: _results.length,
               itemBuilder: (context, index) {
                 final track = _results[index];
-                return ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.music_note_rounded)),
-                  title: Text(track.title),
-                  subtitle: Text(track.artist),
-                  onTap: () => context.push('/result', extra: track),
+                final isThisPlaying = _playingTrackId == track.id && _isPlaying;
+                final progress = _playingTrackId == track.id && _duration != null && _duration!.inMilliseconds > 0
+                    ? _position.inMilliseconds / _duration!.inMilliseconds
+                    : 0.0;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    onTap: () => context.push('/result', extra: track),
+                    leading: ArtworkThumbnail(url: track.artworkUrl),
+                    title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: track.previewUrl != null
+                        ? PreviewPlayButton(
+                            size: 44,
+                            isPlaying: isThisPlaying,
+                            progress: progress,
+                            onTap: () => _togglePreview(track),
+                          )
+                        : null,
+                  ),
                 );
               },
             ),
