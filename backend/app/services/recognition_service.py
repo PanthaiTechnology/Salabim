@@ -11,6 +11,7 @@ import re
 
 import httpx
 
+from app.config import get_settings
 from app.core.cache import audio_fingerprint_key, get_cached_json, get_redis, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
 from app.services import (
@@ -284,6 +285,8 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         # inteiro) e cai pro fallback "só melodia" logo abaixo — a letra é
         # reforço, não é o sinal principal, não vale travar tudo por ela.
         async def _transcribe_with_timeout() -> str:
+            if not get_settings().enable_hum_transcription:
+                return ""
             try:
                 return await asyncio.wait_for(
                     speech_client.transcribe(audio_bytes, model_size="tiny"), timeout=25.0

@@ -37,6 +37,16 @@ class Settings(BaseSettings):
 
     allowed_origins: str = "*"
 
+    # Reforço por letra do modo Cantar (transcreve a voz com Whisper local e
+    # compara com o preview oficial dos candidatos) — desligável por
+    # ambiente. Fica True por padrão (uso local, com CPU/RAM de sobra); em
+    # produção no tier gratuito do Render (só 0.1 CPU / 512MB RAM) isso
+    # estourava memória e derrubava o processo (bug real, ver commits sobre
+    # timeout no modo Cantar) — desligado lá até migrar pra hospedagem com
+    # mais recurso. ACRCloud (melodia) continua funcionando normalmente sem
+    # isso, só perde o desempate por letra em alguns casos.
+    enable_hum_transcription: bool = True
+
     # Diretório opcional a servir em /downloads — usado só pra distribuir o
     # APK de debug pra testers via um túnel temporário (ver TESTING.md). Vazio
     # = desabilitado; nunca deve apontar pra nada em produção de verdade.
