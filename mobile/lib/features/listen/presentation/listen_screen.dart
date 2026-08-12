@@ -23,16 +23,6 @@ class ListenScreen extends ConsumerStatefulWidget {
 }
 
 class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerProviderStateMixin {
-  // Até aqui o botão segue o dedo quase 1:1 (sem resistência nenhuma).
-  static const _dragFollowRange = 90.0;
-  // Além do alcance livre, só essa fração de cada pixel arrastado ainda
-  // passa pro botão — resistência elástica (vai ficando mais "pesado" aos
-  // poucos) em vez de travar de repente numa parede dura, que era o que
-  // estava parecendo pouco natural. 0.5 = metade da resistência de um
-  // travamento total (que seria não deixar passar nada, ratio 0).
-  static const _dragResistanceRatio = 0.5;
-  // Limite absoluto mesmo com a resistência, só pra não fugir demais da tela.
-  static const _dragHardCap = 150.0;
   static const _commitThreshold = 50.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
   // já no novo modo — dá a sensação de um botão saindo e outro entrando,
@@ -46,20 +36,12 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   Animation<double>? _slideAnimation;
 
   bool _isDragging = false;
-  double _rawDragDx = 0; // acumulado bruto do dedo, sem resistência aplicada
-  double _liveDragDx = 0; // valor exibido, já com a resistência aplicada
+  // Sem resistência nenhuma: o botão segue o dedo 1:1, exatamente na
+  // distância que o dedo andou — testado com resistência (até com metade
+  // da força) e não ficava natural, então foi removida de vez.
+  double _liveDragDx = 0;
 
   double get _buttonOffset => _isDragging ? _liveDragDx : (_slideAnimation?.value ?? 0);
-
-  double _applyDragResistance(double rawDelta) {
-    final sign = rawDelta.isNegative ? -1.0 : 1.0;
-    final magnitude = rawDelta.abs();
-    if (magnitude <= _dragFollowRange) return rawDelta;
-
-    final overshoot = magnitude - _dragFollowRange;
-    final resisted = (_dragFollowRange + overshoot * _dragResistanceRatio).clamp(0.0, _dragHardCap);
-    return sign * resisted;
-  }
 
   /// Mapeamento fixo, não alternância: não existe um terceiro modo pra ficar
   /// girando — arrastar pra esquerda sempre aponta pra Cantar, pra direita
@@ -81,17 +63,13 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
 
     setState(() {
       _isDragging = true;
-      _rawDragDx = 0;
       _liveDragDx = 0;
     });
   }
 
   void _onDragUpdate(DragUpdateDetails details) {
     if (!_isDragging) return;
-    setState(() {
-      _rawDragDx += details.delta.dx;
-      _liveDragDx = _applyDragResistance(_rawDragDx);
-    });
+    setState(() => _liveDragDx += details.delta.dx);
   }
 
   void _onDragEnd(DragEndDetails details) {
