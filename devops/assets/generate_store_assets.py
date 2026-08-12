@@ -50,42 +50,29 @@ def _find_font(size: int) -> ImageFont.FreeTypeFont:
 
 
 def make_feature_graphic() -> None:
+    """Pedido do usuário: usar o lockup (ícone + wordmark) já pronto,
+    só redimensionado PROPORCIONALMENTE pra caber em 1024x500 — sem
+    esticar/distorcer. A proporção do lockup original (1434x466, ~3.08:1)
+    é mais larga que o canvas (1024x500, 2.05:1), então escala pela
+    largura e centraliza verticalmente, preenchendo a sobra com o mesmo
+    fundo escuro do próprio lockup (sem costura visível)."""
     W, H = 1024, 500
-    canvas = Image.new("RGB", (W, H), BG[:3])
-    draw = ImageDraw.Draw(canvas)
+    lockup = Image.open(ICONS_DIR / "salabim_logo_lockup.png").convert("RGBA")
 
-    # Gradiente radial sutil atrás do ícone, ecoando o gradiente da marca
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow)
-    cx, cy = 230, H // 2
-    for r in range(320, 0, -4):
-        alpha = int(70 * (1 - r / 320))
-        glow_draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(*PRIMARY[:3], alpha))
-    canvas.paste(Image.alpha_composite(Image.new("RGBA", (W, H), (*BG[:3], 255)), glow).convert("RGB"), (0, 0))
+    scale = W / lockup.width
+    new_size = (W, round(lockup.height * scale))
+    if new_size[1] > H:
+        scale = H / lockup.height
+        new_size = (round(lockup.width * scale), H)
+    resized = lockup.resize(new_size, Image.LANCZOS)
 
-    # Ícone à esquerda
-    icon = Image.open(OUT_DIR / "icon_512.png").convert("RGBA")
-    icon_size = 340
-    icon_resized = icon.resize((icon_size, icon_size), Image.LANCZOS)
-    icon_x, icon_y = 60, (H - icon_size) // 2
-    canvas.paste(icon_resized, (icon_x, icon_y), icon_resized)
+    canvas = Image.new("RGBA", (W, H), BG)
+    x = (W - resized.width) // 2
+    y = (H - resized.height) // 2
+    canvas.paste(resized, (x, y), resized)
 
-    # Wordmark + tagline à direita
-    title_font = _find_font(96)
-    tagline_font = _find_font(34)
-    text_x = icon_x + icon_size + 50
-
-    draw.text((text_x, H // 2 - 90), "Salabim", font=title_font, fill=(242, 238, 249, 255))
-    draw.text(
-        (text_x, H // 2 + 30),
-        "Ouça, cante ou descreva.\nDescubra a música na hora.",
-        font=tagline_font,
-        fill=(184, 173, 201, 255),
-        spacing=10,
-    )
-
-    canvas.save(OUT_DIR / "feature_graphic_1024x500.png")
-    print("feature_graphic_1024x500.png ok", canvas.size)
+    canvas.convert("RGB").save(OUT_DIR / "feature_graphic_1024x500.png")
+    print("feature_graphic_1024x500.png ok", canvas.size, "logo em", new_size)
 
 
 if __name__ == "__main__":
