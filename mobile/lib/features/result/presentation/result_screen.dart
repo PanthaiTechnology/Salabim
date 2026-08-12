@@ -6,6 +6,7 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/track.dart';
+import '../../../data/services/api_client.dart';
 import '../../../data/services/history_service.dart';
 import 'widgets/platform_link_tile.dart';
 import 'widgets/preview_play_button.dart';
@@ -18,6 +19,12 @@ import 'widgets/preview_play_button.dart';
 /// Toda vez que essa tela abre, a música é salva no histórico local do
 /// aparelho (ver HistoryService) — cobre tanto o resultado de Ouvir/Cantarolar
 /// quanto o de busca por texto, já que ambos chegam aqui do mesmo jeito.
+///
+/// Resultados vindos da busca por texto chegam SEM os links de plataforma
+/// resolvidos ainda (de propósito — resolver pra cada item de uma lista
+/// inteira de busca de uma vez estourava a cota do provedor de links,
+/// ver ARCHITECTURE.md/backend odesli_client.py). Essa tela busca o
+/// detalhe completo assim que abre, se necessário.
 class ResultScreen extends StatefulWidget {
   const ResultScreen({super.key, required this.track});
 
@@ -30,6 +37,10 @@ class ResultScreen extends StatefulWidget {
 class _ResultScreenState extends State<ResultScreen> {
   final _player = AudioPlayer();
   final _historyService = HistoryService();
+  final _api = ApiClient();
+
+  late Track _track = widget.track;
+  bool _loadingLinks = false;
 
   bool _isPlayingPreview = false;
   bool _previewLoaded = false;
@@ -44,6 +55,10 @@ class _ResultScreenState extends State<ResultScreen> {
   void initState() {
     super.initState();
     unawaited(_historyService.addEntry(widget.track, widget.track.matchedProvider));
+
+    if (widget.track.platformLinks.isEmpty) {
+      unawaited(_fetchFullDetails());
+    }
 
     // Assinado uma única vez pra vida da tela — assinar de novo a cada play
     // (como era antes) ia empilhando listeners duplicados a cada toque.
@@ -65,6 +80,16 @@ class _ResultScreenState extends State<ResultScreen> {
     });
   }
 
+  Future<void> _fetchFullDetails() async {
+    setState(() => _loadingLinks = true);
+    final full = await _api.getTrackDetails(widget.track.id);
+    if (!mounted) return;
+    setState(() {
+      if (full != null) _track = full;
+      _loadingLinks = false;
+    });
+  }
+
   @override
   void dispose() {
     _positionSub?.cancel();
@@ -75,7 +100,7 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   Future<void> _togglePreview() async {
-    final previewUrl = widget.track.previewUrl;
+    final previewUrl = _track.previewUrl;
     if (previewUrl == null) return;
 
     if (_isPlayingPreview) {
@@ -106,7 +131,7 @@ class _ResultScreenState extends State<ResultScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final track = widget.track;
+    final track = _track;
     final durationMs = _previewDuration?.inMilliseconds ?? 0;
     final progress = durationMs > 0 ? _previewPosition.inMilliseconds / durationMs : 0.0;
 
@@ -157,7 +182,12 @@ class _ResultScreenState extends State<ResultScreen> {
               ),
               const SizedBox(height: 8),
               ...track.platformLinks.map((link) => PlatformLinkTile(link: link)),
-            ] else
+            ] else if (_loadingLinks)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Text(

@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 
 import httpx
 
-from app.core.cache import audio_fingerprint_key, get_cached_json, set_cached_json
+from app.core.cache import audio_fingerprint_key, get_cached_json, get_redis, set_cached_json
 from app.models.schemas import ListenMode, PlatformLink, Track
 from app.services import (
     acrcloud_client,
@@ -32,6 +33,42 @@ _STOPWORDS = {
 def _stable_track_id(isrc: str | None, title: str, artist: str) -> str:
     basis = isrc or f"{title.lower()}::{artist.lower()}"
     return hashlib.sha1(basis.encode()).hexdigest()[:16]
+
+
+_TRACK_CACHE_TTL = 60 * 60 * 6  # 6h — tempo de sobra pra navegar a busca e abrir um resultado
+
+
+async def _save_track_cache(track: Track, *, source_url: str | None, links_resolved: bool) -> None:
+    """Guarda a faixa pelo ID pra `get_track_details` conseguir achar depois
+    (`source_url` fica salvo só pra permitir resolver os links de plataforma
+    sob demanda mais tarde, quando ainda não foram resolvidos agora)."""
+    r = get_redis()
+    payload = {"track": track.model_dump(), "source_url": source_url, "links_resolved": links_resolved}
+    await r.set(f"salabim:track:{track.id}", json.dumps(payload), ex=_TRACK_CACHE_TTL)
+
+
+async def get_track_details(track_id: str) -> Track | None:
+    """Busca uma faixa pelo ID e resolve os links de plataforma agora, se
+    ainda não tiverem sido resolvidos — é assim que a busca por texto evita
+    gastar a cota do Odesli em bloco pra cada resultado da lista (só resolve
+    quando o usuário realmente abre uma faixa específica). Ver
+    odesli_client.py para o motivo dessa cota importar tanto."""
+    r = get_redis()
+    raw = await r.get(f"salabim:track:{track_id}")
+    if raw is None:
+        return None
+
+    cached = json.loads(raw)
+    track = Track.model_validate(cached["track"])
+
+    if cached.get("links_resolved"):
+        return track
+
+    source_url = cached.get("source_url")
+    if source_url or track.isrc:
+        track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc, source_url=source_url)
+    await _save_track_cache(track, source_url=source_url, links_resolved=True)
+    return track
 
 
 _spellcheckers: dict[str, object] = {}
@@ -200,6 +237,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             isrc=track.isrc, source_url=result.source_url
         )
         await set_cached_json(cache_key, track.model_dump())
+        await _save_track_cache(track, source_url=result.source_url, links_resolved=True)
         return track
     else:  # hum
         # Melodia (ACRCloud) e letra transcrita da voz (Whisper, local) rodam
@@ -259,6 +297,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
     if not track.platform_links:
         track.platform_links = await odesli_client.resolve_platform_links(isrc=track.isrc)
     await set_cached_json(cache_key, track.model_dump())
+    await _save_track_cache(track, source_url=None, links_resolved=True)
     return track
 
 
@@ -332,8 +371,13 @@ async def search_tracks_by_text(query: str, limit: int = 10) -> list[Track]:
             preview_url=hit.preview_url,
             matched_provider="itunes",
         )
-        if hit.track_view_url:
-            track.platform_links = await odesli_client.resolve_platform_links(source_url=hit.track_view_url)
+        # Não resolve os links de plataforma aqui: uma busca pode trazer
+        # até `limit` resultados, e resolver pra todos de uma vez foi o que
+        # estourou a cota do Odesli e derrubou os links de TODAS as buscas
+        # (inclusive Ouvir/Cantar) até resetar — bug real, já corrigido. Só
+        # resolve quando o app abre um resultado específico (GET
+        # /v1/tracks/{id} -> get_track_details), usando o cache abaixo.
+        await _save_track_cache(track, source_url=hit.track_view_url, links_resolved=False)
         tracks.append(track)
     return tracks
 

@@ -158,8 +158,13 @@ sem depender de licenciar catálogo nenhum.
 ## 6. Contrato da API (resumo — detalhado em `docs/api_contract.md`)
 
 - `POST /v1/identify` — multipart(file, mode) → `Track | 404`
-- `POST /v1/search/text` — json(query, kind) → `Track[]`
-- `GET /v1/tracks/{id}` — detalhe + links
+- `POST /v1/search/text` — json(query, kind) → `Track[]` **sem** `platform_links`
+  (resolvidos sob demanda, ver abaixo — bug real já corrigido: resolver pra
+  cada item de uma lista de busca estourava a cota do Odesli e derrubava os
+  links de TODAS as buscas até resetar)
+- `GET /v1/tracks/{id}` — detalhe + links (resolve `platform_links` agora, se
+  ainda não tiverem sido resolvidos)
+- `POST /v1/feedback` — confirma/corrige um resultado do modo Cantar
 - `GET /v1/history` — histórico do usuário (autenticado)
 - `POST /v1/favorites/{track_id}` — favoritar
 - `GET /v1/health` — healthcheck

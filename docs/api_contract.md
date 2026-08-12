@@ -44,11 +44,46 @@ Identifica uma música a partir de um trecho de áudio gravado.
 
 **Request (JSON):**
 ```json
-{ "query": "trecho da letra ou descrição", "kind": "lyrics" }
+{ "query": "trecho da letra, título, ou nome do artista", "kind": "lyrics" }
 ```
-`kind`: `lyrics` (busca textual via Musixmatch) ou `description` (busca semântica — fase 2, hoje cai no fallback de letra).
+`kind`: `lyrics` ou `description` — hoje os dois caem no mesmo motor (busca via
+iTunes Search, com correção ortográfica e fallback por remoção de palavra pra
+tolerar erro de digitação/palavra trocada — ver ARCHITECTURE.md §5). Musixmatch
+não é mais usado (sem plano gratuito disponível pra Lyrics API).
 
-**Response 200:** `{ "results": [ <Track>, ... ] }` (mesmo formato de `Track` acima).
+**Response 200:** `{ "results": [ <Track>, ... ] }` (mesmo formato de `Track`
+acima, **exceto** que `platform_links` vem **vazio** — ver `GET /v1/tracks/{id}`
+abaixo pra resolver isso sob demanda).
+
+## GET /v1/tracks/{id}
+
+Detalhe completo de uma faixa, resolvendo `platform_links` agora se ainda não
+tiverem sido resolvidos (é assim que a busca por texto evita gastar a cota do
+Odesli pra cada item de uma lista inteira de uma vez — ver `odesli_client.py`).
+Chame isso quando o usuário abrir um resultado específico da busca.
+
+**Response 200:** um `Track` completo, com `platform_links` preenchido.
+**Response 404:** faixa não encontrada ou cache expirado (6h) — busque de novo.
+
+## POST /v1/feedback
+
+Usuário confirma ou corrige um resultado do modo Cantar.
+
+```json
+{
+  "matched_title": "Every Breath You Take (Remastered 2003)",
+  "matched_artist": "Overdriver Duo",
+  "mode": "acrcloud",
+  "was_correct": false,
+  "corrected_title": "Every Breath You Take",
+  "corrected_artist": "The Police"
+}
+```
+Quando `was_correct=false` e `mode="acrcloud"`, vira uma correção salva e
+aplicada automaticamente da próxima vez que o mesmo erro (por similaridade de
+texto, não igualdade exata) acontecer — ver `feedback_service.py`.
+
+**Response 201:** `{ "ok": true }`
 
 ## GET /v1/history *(autenticado — Bearer token)*
 

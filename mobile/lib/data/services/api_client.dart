@@ -59,6 +59,21 @@ class ApiClient {
     }
   }
 
+  /// Busca o detalhe completo de uma faixa pelo ID — usado pra resolver os
+  /// links de plataforma "sob demanda" quando o usuário abre um resultado
+  /// da busca por texto (a lista de busca não vem com os links prontos de
+  /// propósito, pra não gastar a cota do Odesli em bloco pra vários
+  /// resultados de uma vez só). Retorna null se não achar (cache expirado
+  /// no servidor — o app já tem os dados básicos da faixa mesmo assim).
+  Future<Track?> getTrackDetails(String trackId) async {
+    try {
+      final response = await _dio.get('/v1/tracks/$trackId');
+      return Track.fromJson(response.data as Map<String, dynamic>);
+    } on DioException {
+      return null;
+    }
+  }
+
   /// Envia feedback sobre um resultado (certo/errado + nome real, se
   /// informado) — o backend guarda isso e, quando o mesmo erro do modo
   /// Cantar acontecer de novo, aplica a correção automaticamente. Falha
