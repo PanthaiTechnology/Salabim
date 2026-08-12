@@ -19,12 +19,17 @@ PRIMARY = (124, 77, 255, 255)  # AppColors.primary #7C4DFF
 
 def make_icon() -> None:
     src = Image.open(ICONS_DIR / "salabim_icon.png").convert("RGBA")
-    # Redimensiona mantendo proporção, depois centraliza num canvas 512x512
-    # exato (o ícone original não é perfeitamente quadrado: 465x466).
-    canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-    src_resized = src.resize((512, int(512 * src.height / src.width)), Image.LANCZOS)
-    if src_resized.height > 512:
-        src_resized = src.resize((int(512 * src.width / src.height), 512), Image.LANCZOS)
+    # Fundo escuro sólido (não transparente) preenchendo o quadrado
+    # inteiro 512x512 — a Play Store aplica a própria máscara (círculo,
+    # squircle etc. conforme o launcher do aparelho) por cima, então o
+    # ideal é entregar um quadrado cheio, não um ícone já arredondado.
+    canvas = Image.new("RGBA", (512, 512), BG)
+    # Uma margem em volta do círculo do bruxo, do jeito que aparece no
+    # mockup de referência — não cola o círculo direto na borda.
+    target = int(512 * 0.82)
+    src_resized = src.resize((target, int(target * src.height / src.width)), Image.LANCZOS)
+    if src_resized.height > target:
+        src_resized = src.resize((int(target * src.width / src.height), target), Image.LANCZOS)
     x = (512 - src_resized.width) // 2
     y = (512 - src_resized.height) // 2
     canvas.paste(src_resized, (x, y), src_resized)
