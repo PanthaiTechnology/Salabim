@@ -22,6 +22,15 @@ mobile/ios/.symlinks/
 mobile/ios/Flutter/Flutter.framework
 mobile/ios/Flutter/Flutter.podspec
 
+# Keystore de release Android — NUNCA versionar. Perder isso impede
+# atualizar o app depois de publicado; guarde backup fora do repositório
+# (ver STORE_PUBLISHING.md secao 6).
+mobile/android/key.properties
+mobile/android/*.keystore
+mobile/android/*.jks
+mobile/*.keystore
+mobile/*.jks
+
 # Geral
 .DS_Store
 *.log
