@@ -274,9 +274,26 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         # em paralelo — são sinais independentes que, combinados, aproximam
         # bastante do que um humano faz ao reconhecer uma música cantada:
         # "essa melodia soa parecida" + "essas palavras batem".
+        #
+        # "tiny" aqui, não "base": em produção (Render free tier, só 0.1
+        # CPU) o modelo "base" era pesado demais e chegava a estourar 50s +
+        # erro 502 — bug real encontrado em teste. "tiny" já era usado pra
+        # validar o preview dos candidatos (ver _transcribe_preview), então
+        # deixa consistente. Além disso, um timeout próprio: se mesmo assim
+        # demorar demais, desiste só da transcrição (não do reconhecimento
+        # inteiro) e cai pro fallback "só melodia" logo abaixo — a letra é
+        # reforço, não é o sinal principal, não vale travar tudo por ela.
+        async def _transcribe_with_timeout() -> str:
+            try:
+                return await asyncio.wait_for(
+                    speech_client.transcribe(audio_bytes, model_size="tiny"), timeout=25.0
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                return ""
+
         candidates, transcription = await asyncio.gather(
             acrcloud_client.identify_humming_candidates(audio_bytes),
-            speech_client.transcribe(audio_bytes),
+            _transcribe_with_timeout(),
         )
         if not candidates:
             return None
