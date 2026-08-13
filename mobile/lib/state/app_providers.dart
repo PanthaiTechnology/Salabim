@@ -107,25 +107,33 @@ class ListenController extends StateNotifier<ListenState> {
   int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
-  // cantar e depois fica muda por 5s seguidos, entende que ela terminou e
-  // corta a gravação na hora.
+  // cantar e depois passa a maior parte dos últimos 5s calada, entende que
+  // ela terminou e corta a gravação na hora.
   //
   // "Voz" e "silêncio" NÃO são um número fixo de amplitude — testado na
   // prática (14/ago/2026), um piso fixo (0.15) não generaliza: em ambiente
   // barulhento o ruído de fundo nunca cai abaixo dele (silêncio nunca
   // dispara), e em ambiente muito quieto qualquer sopro passaria como
   // "voz". Em vez disso, cada gravação calibra sozinha o piso de ruído do
-  // próprio ambiente, e "voz"/"silêncio" são definidos como margens ACIMA
-  // desse piso — o que importa é o CONTRASTE entre a voz da pessoa e o
-  // fundo, não um volume absoluto.
-  // Testado na prática (14/ago/2026, 2ª rodada): usuário confirmou ter
-  // parado de cantar de vez e ficado calado, mas mesmo assim o maior
-  // trecho contínuo abaixo do piso de voz foi só 1300ms (interrompido 8x
-  // em ~37s) — algum ruído periódico do ambiente (ventilador, trânsito,
-  // ar-condicionado etc.) cruzava o piso de voz a cada poucos segundos e
-  // resetava a contagem. Margem e debounce abaixo aumentados a partir
-  // desse dado real, não chute.
-  static const _voiceMargin = 0.18; // acima do piso de ruído pra contar como "cantando" (era 0.12)
+  // próprio ambiente, e "voz" é definida como uma margem ACIMA desse piso
+  // — o que importa é o CONTRASTE entre a voz da pessoa e o fundo, não um
+  // volume absoluto.
+  //
+  // A exigência de "silêncio" também NÃO é mais um trecho contínuo sem
+  // nenhuma interrupção — testado na prática nos dois sentidos (14/ago/2026):
+  // exigir um trecho 100% contínuo é frágil, porque qualquer som breve
+  // (ruído ambiente periódico) resetava tudo do zero; e a tentativa de
+  // corrigir isso com um "debounce" (só resetar se o som persistisse por
+  // tempo mínimo) piorou pro lado oposto — um debounce longo o bastante
+  // pra ignorar ruído também engolia palavras/notas curtas cantadas de
+  // verdade, fazendo parecer silêncio mesmo com a pessoa ainda cantando
+  // (só picotado, com pausas naturais entre frases). Em vez de exigir
+  // continuidade perfeita, mede a DENSIDADE de voz na janela dos últimos
+  // 5s: só considera que a pessoa parou se quase nada dessa janela teve
+  // voz de verdade. Isso tolera tanto ruído ambiente esporádico (poucas
+  // amostras isoladas) quanto canto picotado (muitas amostras de voz
+  // espalhadas, mesmo com pausas).
+  static const _voiceMargin = 0.18; // acima do piso de ruído pra contar como "cantando"
   // O piso desce imediatamente ao ouvir algo mais quieto que ele (silêncio
   // de verdade nunca é "ruído", então é seguro confiar na hora), mas só
   // sobe bem devagar com o tempo — caso o ambiente realmente fique mais
@@ -133,32 +141,30 @@ class ListenController extends StateNotifier<ListenState> {
   // Sem esse teto de subida, um pico alto isolado não empurra o piso (ele
   // só reage a amostras MAIS BAIXAS que o piso atual, nunca mais altas).
   static const _noiseFloorDecayPerSecond = 0.003;
-  // Ignora picos de ruído (respiração, tosse, clique, ruído ambiente
-  // periódico) que cruzam o piso de voz sem a pessoa ter realmente voltado
-  // a cantar — só reseta a contagem de silêncio se o som acima do piso
-  // persistir por esse tempo mínimo. 400ms não foi suficiente (ver acima);
-  // 1500ms dá folga confortável sobre os 1300ms observados, mantendo
-  // margem segura abaixo de qualquer frase cantada de verdade (sempre bem
-  // mais longa que isso).
-  static const _voiceResumeDebounce = Duration(milliseconds: 1500);
-  static const _silenceDurationToStop = Duration(seconds: 5);
+  static const _silenceDurationToStop = Duration(seconds: 5); // tamanho da janela de análise
+  // Só dispara se a fração de amostras "voz" na janela ficar EM OU ABAIXO
+  // disso — 15% de uma janela de 5s equivale a até ~750ms de voz espalhada
+  // (ruído esporádico cabe folgado aqui) sem impedir a detecção; qualquer
+  // canto de verdade, mesmo picotado, fica bem acima disso na prática.
+  static const _silenceVoiceFractionThreshold = 0.15;
 
   double _noiseFloor = 0.0;
   DateTime _noiseFloorUpdatedAt = DateTime.now();
   bool _hasDetectedVoice = false;
-  DateTime? _silenceStartedAt;
-  DateTime? _voiceResumedAt;
+  DateTime? _firstVoiceDetectedAt;
+  // Amostras (instante, era voz?) dos últimos _silenceDurationToStop —
+  // amostras mais antigas são descartadas a cada nova leitura.
+  final List<MapEntry<DateTime, bool>> _recentAmplitudeSamples = [];
 
   // TEMPORÁRIO — junto com debugStopReasonProvider acima, só pra
-  // diagnóstico (ver comentário lá). Usuário relatou que o auto-stop de 5s
-  // de silêncio não disparou (14/ago/2026); o piso fixo virou adaptativo
-  // por causa disso — esses campos continuam aqui pra confirmar que o novo
-  // piso calibra certo em ambientes diferentes, antes de remover tudo.
+  // diagnóstico (ver comentário lá). Usuário relatou tanto o auto-stop de
+  // 5s não disparando quanto disparando cedo demais (14/ago/2026) —
+  // acompanha a menor densidade de voz vista na janela, pra saber o quão
+  // perto (ou longe) chegou de disparar em cada teste.
   DateTime? _segmentStartedAt;
   double _lastAmplitude = 0;
   double _minAmplitudeSeen = 1.0;
-  int _maxContinuousSilenceMs = 0;
-  int _silenceInterruptedCount = 0;
+  double _minVoiceFractionSeen = 1.0;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -203,14 +209,13 @@ class ListenController extends StateNotifier<ListenState> {
     if (!_sessionActive) return;
 
     _hasDetectedVoice = false;
-    _silenceStartedAt = null;
-    _voiceResumedAt = null;
+    _firstVoiceDetectedAt = null;
+    _recentAmplitudeSamples.clear();
     _noiseFloor = 0.0; // recalibra do zero a cada gravação — ambiente pode ter mudado
     _noiseFloorUpdatedAt = DateTime.now();
     _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
     _minAmplitudeSeen = 1.0; // TEMPORÁRIO
-    _maxContinuousSilenceMs = 0; // TEMPORÁRIO
-    _silenceInterruptedCount = 0; // TEMPORÁRIO
+    _minVoiceFractionSeen = 1.0; // TEMPORÁRIO
     _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
     // Sinalizador que completa cedo tanto pela detecção automática de
     // silêncio (5s calado depois de já ter cantado) quanto por um toque
@@ -254,8 +259,9 @@ class ListenController extends StateNotifier<ListenState> {
       final elapsedMs = DateTime.now().difference(_segmentStartedAt!).inMilliseconds;
       _ref.read(debugStopReasonProvider.notifier).state = 'tempo máximo atingido (${elapsedMs}ms, teto '
           '${_segmentDurationFor(mode).inSeconds}s) — silêncio nunca disparou. piso de ruído calibrado '
-          '${_noiseFloor.toStringAsFixed(2)}, amp. mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, maior '
-          'trecho contínuo abaixo do piso de voz ${_maxContinuousSilenceMs}ms, interrompido ${_silenceInterruptedCount}x';
+          '${_noiseFloor.toStringAsFixed(2)}, amp. mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor '
+          'densidade de voz vista na janela ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}% (dispara em '
+          '${(_silenceVoiceFractionThreshold * 100).toStringAsFixed(0)}%)';
     }
     _stopEarlySignal = null;
     if (!_sessionActive) return;
@@ -343,39 +349,37 @@ class ListenController extends StateNotifier<ListenState> {
     }
 
     final voiceThreshold = (_noiseFloor + _voiceMargin).clamp(0.0, 1.0);
-
-    if (amplitude >= voiceThreshold) {
+    final isVoice = amplitude >= voiceThreshold;
+    if (isVoice) {
       _hasDetectedVoice = true;
-      // Só considera uma retomada de verdade (zera a contagem de
-      // silêncio) se isso persistir por um tempo mínimo — um pico curto
-      // de ruído não deveria resetar 5s de silêncio já acumulados.
-      _voiceResumedAt ??= now;
-      if (now.difference(_voiceResumedAt!) >= _voiceResumeDebounce && _silenceStartedAt != null) {
-        // TEMPORÁRIO — registra o quanto chegou a acumular antes de zerar.
-        final stretchMs = now.difference(_silenceStartedAt!).inMilliseconds;
-        if (stretchMs > _maxContinuousSilenceMs) _maxContinuousSilenceMs = stretchMs;
-        _silenceInterruptedCount++;
-        _silenceStartedAt = null; // retomada real, zera a contagem
-      }
-      return;
+      _firstVoiceDetectedAt ??= now;
     }
-    _voiceResumedAt = null; // não estava (ou não persistiu) acima do piso de voz
 
-    if (!_hasDetectedVoice) return; // silêncio antes de começar, ignora
+    if (!_hasDetectedVoice) return; // silêncio antes de começar a cantar, ignora
 
-    // Tudo abaixo do piso de voz conta pra contagem de silêncio — só um
-    // som claramente acima do piso E sustentado (ver debounce acima)
-    // reseta.
-    _silenceStartedAt ??= now;
-    final silenceElapsed = now.difference(_silenceStartedAt!);
-    if (silenceElapsed.inMilliseconds > _maxContinuousSilenceMs) {
-      _maxContinuousSilenceMs = silenceElapsed.inMilliseconds; // TEMPORÁRIO — "recorde" em andamento
-    }
-    if (silenceElapsed >= _silenceDurationToStop) {
+    // Guarda essa amostra na janela e descarta as que já saíram dos
+    // últimos _silenceDurationToStop.
+    _recentAmplitudeSamples.add(MapEntry(now, isVoice));
+    final windowStart = now.subtract(_silenceDurationToStop);
+    _recentAmplitudeSamples.removeWhere((sample) => sample.key.isBefore(windowStart));
+
+    // Só avalia depois de ter uma janela cheia de verdade (pelo menos
+    // _silenceDurationToStop desde que a pessoa começou a cantar) — senão
+    // pararia cedo demais logo no início, antes de dar tempo de acumular
+    // amostras suficientes pra julgar a densidade.
+    if (now.difference(_firstVoiceDetectedAt!) < _silenceDurationToStop) return;
+
+    final voiceCount = _recentAmplitudeSamples.where((sample) => sample.value).length;
+    final voiceFraction = voiceCount / _recentAmplitudeSamples.length;
+    // TEMPORÁRIO
+    if (voiceFraction < _minVoiceFractionSeen) _minVoiceFractionSeen = voiceFraction;
+
+    if (voiceFraction <= _silenceVoiceFractionThreshold) {
       // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
       final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
       _ref.read(debugStopReasonProvider.notifier).state = 'silêncio detectado (${elapsedMs}ms desde o início, '
-          'última amplitude ${amplitude.toStringAsFixed(2)}, piso de ruído ${_noiseFloor.toStringAsFixed(2)})';
+          'densidade de voz na janela ${(voiceFraction * 100).toStringAsFixed(0)}%, piso de ruído '
+          '${_noiseFloor.toStringAsFixed(2)})';
       stopEarly.complete();
     }
   }
@@ -397,8 +401,8 @@ class ListenController extends StateNotifier<ListenState> {
       final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
       _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
           'amplitude ${_lastAmplitude.toStringAsFixed(2)}, piso de ruído ${_noiseFloor.toStringAsFixed(2)}, mín. '
-          'vista ${_minAmplitudeSeen.toStringAsFixed(2)}, maior silêncio contínuo ${_maxContinuousSilenceMs}ms, '
-          'interrompido ${_silenceInterruptedCount}x)';
+          'vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor densidade de voz vista na janela '
+          '${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
       signal.complete();
     }
   }
