@@ -268,20 +268,12 @@ class ListenController extends StateNotifier<ListenState> {
   /// agora" sem precisar esperar o silêncio ser detectado ou o tempo
   /// máximo acabar. Usa o mesmo sinalizador que a detecção de silêncio já
   /// usa internamente — funciona exatamente como se o silêncio tivesse
-  /// sido detectado nesse instante.
-  /// DEBUG temporário: retorna um diagnóstico legível do que aconteceu
-  /// internamente, pra mostrar na UI e descobrir com certeza por que a
-  /// gravação não estava parando mesmo com o toque sendo detectado
-  /// corretamente (confirmado com banner visual no passo anterior).
-  /// Remover o retorno de String (voltar pra void) depois de achar a causa.
-  String finishRecordingNow() {
-    if (state.mode != ListenMode.hum) return 'ignorado: modo=${state.mode}';
-    if (state.status != ListenStatus.recording) return 'ignorado: status=${state.status}';
+  /// sido detectado nesse instante. Sem efeito se já não estiver mais
+  /// gravando de verdade (ex: chamado de novo durante "Processando...").
+  void finishRecordingNow() {
+    if (state.mode != ListenMode.hum || state.status != ListenStatus.recording) return;
     final signal = _stopEarlySignal;
-    if (signal == null) return 'ERRO: _stopEarlySignal é null';
-    if (signal.isCompleted) return 'ERRO: sinal já estava completo';
-    signal.complete();
-    return 'OK: sinal completado';
+    if (signal != null && !signal.isCompleted) signal.complete();
   }
 
   /// Cancela a escuta antes da hora (o usuário tocou de novo no botão
