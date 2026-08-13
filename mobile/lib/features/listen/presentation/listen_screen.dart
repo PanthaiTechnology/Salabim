@@ -234,6 +234,8 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   Widget build(BuildContext context) {
     final state = ref.watch(listenControllerProvider);
     final controller = ref.read(listenControllerProvider.notifier);
+    // TEMPORÁRIO — diagnóstico (ver debugStopReasonProvider em app_providers.dart).
+    final debugStopReason = ref.watch(debugStopReasonProvider);
 
     ref.listen(listenControllerProvider, (previous, next) {
       if (next.result != null && previous?.result != next.result) {
@@ -369,6 +371,22 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
             Text(
               state.mode == ListenMode.hum ? 'Toque para finalizar e buscar' : 'toca de novo pra cancelar',
               style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ],
+          // TEMPORÁRIO — diagnóstico do motivo/tempo em que a gravação do
+          // Cantar parou (ver debugStopReasonProvider em app_providers.dart).
+          // Só aparece quando há um motivo registrado nessa sessão. Remover
+          // assim que acharmos a causa do corte prematuro relatado em
+          // 13/ago/2026.
+          if (debugStopReason != null) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                '🐛 $debugStopReason',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: AppColors.error, fontSize: 11),
+              ),
             ),
           ],
           const Spacer(flex: 2),

@@ -65,27 +65,38 @@ class ListenState {
   }
 }
 
+// TEMPORÁRIO — diagnóstico pra achar por que o modo Cantar às vezes encerra
+// a gravação sozinho bem antes do esperado, sem toque manual e sem silêncio
+// real (relatado em 13/ago/2026). ListenController escreve aqui o motivo e o
+// tempo decorrido assim que a gravação para; listen_screen.dart mostra esse
+// texto embaixo de "Processando...". Fora do ListenState/copyWith de
+// propósito — não queria arriscar mexer no padrão de merge que os outros
+// campos já usam só por causa de um campo temporário. Remover (aqui, no
+// controller e na tela) assim que acharmos a causa real.
+final debugStopReasonProvider = StateProvider<String?>((ref) => null);
+
 /// Controla o ciclo de escuta contínua: assim que o usuário toca uma vez,
 /// grava um trecho curto, já começa a gravar o próximo trecho, e em
 /// paralelo manda o trecho anterior pro backend. O resultado aparece assim
 /// que QUALQUER trecho bater — sem precisar tocar de novo pra parar. O
 /// usuário só interage de novo se quiser cancelar antes da hora.
 class ListenController extends StateNotifier<ListenState> {
-  ListenController(this._recorder, this._api) : super(const ListenState());
+  ListenController(this._recorder, this._api, this._ref) : super(const ListenState());
 
   final AudioRecorderService _recorder;
   final ApiClient _api;
+  final Ref _ref;
 
-  /// Duração de cada trecho gravado e enviado pro backend. Cantar usa 16s
-  /// — voltou a ser um único trecho contínuo e mais longo (não 3 trechos
-  /// curtos de 7s como chegou a ser): testado na prática, cortar em
-  /// pedaços menores custava precisão real (menos contexto melódico por
-  /// tentativa piora o reconhecimento do ACRCloud) por um ganho de
-  /// responsividade que a detecção de silêncio abaixo já cobre sozinha,
-  /// sem esse custo — ela já corta a gravação assim que a pessoa para de
-  /// cantar, não precisa fatiar a gravação em si pra isso.
+  /// Duração de cada trecho gravado e enviado pro backend. Ouvir continua
+  /// 4s (segmentos curtos, várias tentativas). Cantar agora usa 60s — não é
+  /// mais um teto "normal" pra parar de gravar, e sim um limite de
+  /// segurança bem folgado: o pedido explícito é que a gravação SÓ termine
+  /// pelo toque manual ("toque para finalizar e buscar") ou pelos 5s de
+  /// silêncio abaixo — quanto mais a pessoa canta, mais contexto melódico
+  /// o ACRCloud tem pra acertar, então não faz sentido cortar por tempo
+  /// enquanto ela ainda está cantando.
   Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 16) : const Duration(seconds: 4);
+      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 4);
 
   /// Quantos trechos tenta no total antes de desistir. Cantar voltou a ser
   /// 1 tentativa única: uma gravação contínua tem muito mais contexto
@@ -96,16 +107,24 @@ class ListenController extends StateNotifier<ListenState> {
   int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
-  // cantar e depois fica muda por 3s seguidos, entende que ela terminou e
-  // corta a gravação na hora, em vez de ficar girando até os 15s fixos.
-  // Igual um humano perceberia "ah, ela parou". Amplitude normalizada
-  // 0.0-1.0 (ver AudioRecorderService) — 0.15 é um piso conservador acima
-  // de ruído ambiente comum de quarto/rua, sem exigir volume alto.
+  // cantar e depois fica muda por 5s seguidos (antes era 3s — aumentado a
+  // pedido do usuário pra dar mais margem a pausas naturais entre trechos
+  // da música, já que agora não existe mais um teto de tempo "normal"
+  // cortando a gravação), entende que ela terminou e corta a gravação na
+  // hora. Igual um humano perceberia "ah, ela parou". Amplitude
+  // normalizada 0.0-1.0 (ver AudioRecorderService) — 0.15 é um piso
+  // conservador acima de ruído ambiente comum de quarto/rua, sem exigir
+  // volume alto.
   static const _silenceAmplitudeThreshold = 0.15;
-  static const _silenceDurationToStop = Duration(seconds: 3);
+  static const _silenceDurationToStop = Duration(seconds: 5);
 
   bool _hasDetectedVoice = false;
   DateTime? _silenceStartedAt;
+
+  // TEMPORÁRIO — junto com debugStopReasonProvider acima, só pra
+  // diagnóstico (ver comentário lá).
+  DateTime? _segmentStartedAt;
+  double _lastAmplitude = 0;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -151,8 +170,10 @@ class ListenController extends StateNotifier<ListenState> {
 
     _hasDetectedVoice = false;
     _silenceStartedAt = null;
+    _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
+    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
     // Sinalizador que completa cedo tanto pela detecção automática de
-    // silêncio (3s calado depois de já ter cantado) quanto por um toque
+    // silêncio (5s calado depois de já ter cantado) quanto por um toque
     // manual do usuário em finishRecordingNow() — corrida contra o timer
     // de duração máxima do trecho, o que vier primeiro.
     final stopEarly = Completer<void>();
@@ -163,6 +184,7 @@ class ListenController extends StateNotifier<ListenState> {
       (amp) {
         if (!_sessionActive) return;
         state = state.copyWith(amplitude: amp);
+        _lastAmplitude = amp; // TEMPORÁRIO — só pro diagnóstico
         if (state.mode == ListenMode.hum) {
           _checkForSilence(amp, stopEarly);
         }
@@ -181,6 +203,16 @@ class ListenController extends StateNotifier<ListenState> {
       Future.delayed(_segmentDurationFor(mode)),
       stopEarly.future,
     ]);
+    // TEMPORÁRIO — se chegou aqui e o sinalizador NÃO foi completado, foi o
+    // timer de duração máxima que resolveu a corrida (não silêncio, nem
+    // toque manual — esses dois já escrevem o motivo deles antes de
+    // completar o sinalizador). Só interessa no Cantar; no Ouvir o
+    // sinalizador nunca é usado, sempre "vence" o timer de 4s mesmo.
+    if (mode == ListenMode.hum && !stopEarly.isCompleted) {
+      final elapsedMs = DateTime.now().difference(_segmentStartedAt!).inMilliseconds;
+      _ref.read(debugStopReasonProvider.notifier).state =
+          'tempo máximo atingido (${elapsedMs}ms, teto ${_segmentDurationFor(mode).inSeconds}s)';
+    }
     _stopEarlySignal = null;
     if (!_sessionActive) return;
 
@@ -257,6 +289,10 @@ class ListenController extends StateNotifier<ListenState> {
 
     _silenceStartedAt ??= DateTime.now();
     if (DateTime.now().difference(_silenceStartedAt!) >= _silenceDurationToStop) {
+      // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
+      final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
+      _ref.read(debugStopReasonProvider.notifier).state =
+          'silêncio detectado (${elapsedMs}ms desde o início, última amplitude ${amplitude.toStringAsFixed(2)})';
       stopEarly.complete();
     }
   }
@@ -273,7 +309,13 @@ class ListenController extends StateNotifier<ListenState> {
   void finishRecordingNow() {
     if (state.mode != ListenMode.hum || state.status != ListenStatus.recording) return;
     final signal = _stopEarlySignal;
-    if (signal != null && !signal.isCompleted) signal.complete();
+    if (signal != null && !signal.isCompleted) {
+      // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
+      final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
+      _ref.read(debugStopReasonProvider.notifier).state =
+          'toque manual (${elapsedMs}ms desde o início, última amplitude ${_lastAmplitude.toStringAsFixed(2)})';
+      signal.complete();
+    }
   }
 
   /// Cancela a escuta antes da hora (o usuário tocou de novo no botão
@@ -289,5 +331,5 @@ class ListenController extends StateNotifier<ListenState> {
 }
 
 final listenControllerProvider = StateNotifierProvider<ListenController, ListenState>((ref) {
-  return ListenController(ref.watch(audioRecorderProvider), ref.watch(apiClientProvider));
+  return ListenController(ref.watch(audioRecorderProvider), ref.watch(apiClientProvider), ref);
 });
