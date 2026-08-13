@@ -5,12 +5,14 @@ import 'core/theme/app_theme.dart';
 import 'features/history/presentation/history_screen.dart';
 import 'features/listen/presentation/listen_screen.dart';
 import 'features/result/presentation/result_screen.dart';
+import 'features/splash/presentation/splash_screen.dart';
 import 'features/text_search/presentation/text_search_screen.dart';
 import 'data/models/track.dart';
 
 final _router = GoRouter(
-  initialLocation: '/',
+  initialLocation: '/splash',
   routes: [
+    GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
     ShellRoute(
       builder: (context, state, child) => _MainShell(child: child),
       routes: [

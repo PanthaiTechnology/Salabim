@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mesma cor de AppColors.background (identidade visual do Salabim) —
+         usada na tela de launch nativa pra não piscar branco antes da capa
+         do Flutter (SplashScreen) aparecer. -->
+    <color name="launch_background_color">#0B0714</color>
+</resources>
