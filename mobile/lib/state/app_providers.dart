@@ -214,6 +214,14 @@ class ListenController extends StateNotifier<ListenState> {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
       state = state.copyWith(status: ListenStatus.notFound);
+      // Volta sozinho pro estado padrão depois de 5s — a mensagem de "não
+      // encontrado" já é auto-explicativa na hora, não precisa ficar presa
+      // na tela até o usuário tocar de novo. Só reseta se ainda estiver
+      // nesse mesmo estado (não pisa em cima de uma sessão nova que o
+      // usuário já tenha começado nesse meio-tempo).
+      Future.delayed(const Duration(seconds: 5), () {
+        if (state.status == ListenStatus.notFound) reset();
+      });
     }
   }
 

@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,44 +23,15 @@ class ListenScreen extends ConsumerStatefulWidget {
 }
 
 class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerProviderStateMixin {
-  // Mensagens de "não encontrado" — sorteadas aleatoriamente, tom leve e
-  // descontraído (nunca debochando de verdade, sempre convidando a tentar
-  // de novo). Cantar zoa com o "talento" de cantor e lembra que cada
-  // tentativa ajuda a treinar o reconhecimento; Ouvir é mais sobre "não
-  // captei o som", tom diferente porque o motivo é outro (ambiente/volume,
-  // não a pessoa em si).
-  static const _notFoundMessagesHum = [
-    'Hmm, isso nem o Simon Cowell reconheceria 😂 Bora tentar de novo?',
-    'Precisando de aula de canto? 😅 Brincadeira! Cada tentativa nos ajuda a ficar mais espertos.',
-    'Tenho certeza que você canta melhor que isso! Na próxima você acerta 🎤',
-    'Essa melodia ficou só entre você e o universo 🌌 Tenta de novo?',
-    'Ainda estamos aprendendo a te entender... e você nos ajuda toda vez que tenta! 🎶',
-    'Ok, isso foi bem... experimental 🎨 Bora tentar de novo, sem vergonha!',
-    'Nem o Shazam arriscaria um palpite nessa 😂 Tenta de novo!',
-    'Confesso que fiquei confuso(a) com essa 😅 Relaxa e tenta de novo!',
-    'Uau. Só isso: uau 😳 Bora tentar de novo?',
-    'Essa música tá se escondendo bem de mim 🙈 Tenta de novo?',
-  ];
-
-  static const _notFoundMessagesListen = [
-    'Putz, não encontrei 💩 Chega mais perto da música e tenta de novo!',
-    'Eita, essa passou batido 👀 Aumenta o volume e tenta de novo!',
-    'Hmm, não rolou dessa vez 😅 Chega mais pertinho da fonte do som!',
-    'Essa foi difícil até pra mim 🕵️ Tenta de novo, mais perto do som!',
-    'Silêncio na linha por aqui... 🤫 Aumenta o volume e tenta de novo!',
-    'Essa música tá se escondendo de mim 🙈 Bora tentar de novo?',
-    'Acho que meus ouvidos digitais falharam dessa vez 😅 Tenta de novo!',
-    'Nada por aqui, capitão 🧐 Chega mais perto e tenta de novo!',
-    'Ruído demais, música de menos 📡 Tenta de novo, bem pertinho!',
-    'Essa passou voando 🚀 Tenta de novo, mais perto da fonte!',
-  ];
-
-  static final _random = Random();
-
-  String _randomNotFoundMessage(ListenMode mode) {
-    final pool = mode == ListenMode.hum ? _notFoundMessagesHum : _notFoundMessagesListen;
-    return pool[_random.nextInt(pool.length)];
-  }
+  // Mensagem de "não encontrado" — única (não mais sorteada), mostrada no
+  // próprio texto de status (não em SnackBar separado, que ficava
+  // redundante com a mensagem principal aparecendo duas vezes ao mesmo
+  // tempo). Some sozinha depois de 5s (ver Future.delayed em
+  // ListenController). Tom diferente por modo: Ouvir é sobre o ambiente
+  // (volume/distância do som), Cantar é sobre afinação/fidelidade à letra.
+  String _notFoundMessage(ListenMode mode) => mode == ListenMode.hum
+      ? 'putzzz, não deu... 🤦💩\nTente cantar mais afinado e mais fiel à letra possível! 😉'
+      : 'putzzz, não deu... 🤦💩\nAumente o volume ou chegue mais perto do som! 😉';
 
   static const _commitThreshold = 50.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
@@ -203,11 +172,6 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     );
   }
 
-  void _showNotFoundSnackBar(BuildContext context, ListenMode mode) {
-    final gradient = mode == ListenMode.hum ? AppColors.humGradient : AppColors.listenGradient;
-    _showBrandedSnackBar(context, _randomNotFoundMessage(mode), gradient: gradient);
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(listenControllerProvider);
@@ -217,9 +181,9 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       if (next.result != null && previous?.result != next.result) {
         context.push('/result', extra: next.result).then((_) => controller.reset());
       }
-      if (next.status == ListenStatus.notFound) {
-        _showNotFoundSnackBar(context, next.mode);
-      }
+      // "Não encontrado" já aparece no texto de status principal (abaixo do
+      // botão) — SnackBar separada pra isso era redundante, a mesma
+      // informação aparecendo duas vezes na tela ao mesmo tempo.
       if (next.status == ListenStatus.error && next.errorMessage != null) {
         _showBrandedSnackBar(context, next.errorMessage!, solidColor: AppColors.error);
       }
@@ -233,7 +197,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       // precisar tocar de novo — o número de tentativa é só pra dar
       // feedback de que o app continua tentando.
       ListenStatus.recording => 'Ouvindo e buscando... (tentativa ${state.attempt + 1})',
-      ListenStatus.notFound => 'Não encontramos essa música',
+      ListenStatus.notFound => _notFoundMessage(state.mode),
       ListenStatus.error => 'Algo deu errado',
     };
 
@@ -283,7 +247,14 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
           ),
         ),
         const SizedBox(height: 24),
-        Text(statusLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 15)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            statusLabel,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
+          ),
+        ),
         if (state.status == ListenStatus.recording) ...[
           const SizedBox(height: 4),
           Text(
