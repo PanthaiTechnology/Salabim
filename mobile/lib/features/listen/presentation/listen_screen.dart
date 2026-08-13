@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -37,6 +38,9 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   int _ouvirPhraseIndex = 0;
   int _cantarPhraseIndex = 0;
   String _currentNotFoundMessage = '';
+
+  // DEBUG temporário — ver handleScreenTapWhileRecording no build().
+  DateTime? _debugTapDetectedAt;
 
   /// Escolhe a próxima frase pra esse modo (alterna 1ª/2ª a cada chamada,
   /// contador independente por modo) e já avança o contador pra próxima
@@ -233,7 +237,19 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // Toca em qualquer lugar da tela pra encerrar a gravação (Cantar) ou
     // cancelar (Ouvir) — mesma lógica que já existia no botão, só que agora
     // é a área de toque VÁLIDA pra essa ação inteira, não só o botão.
+    //
+    // DEBUG temporário: vibração + flash visual imediato no exato momento
+    // do toque, ANTES de qualquer outra lógica — investigando relato real
+    // de que "toque pra finalizar" não funciona mesmo depois da correção
+    // com IgnorePointer. Isso separa com certeza se o problema é detecção
+    // do toque (não vibra/não pisca) ou lógica downstream (vibra/pisca mas
+    // não busca). Remover depois de identificar a causa.
     void handleScreenTapWhileRecording() {
+      HapticFeedback.mediumImpact();
+      setState(() => _debugTapDetectedAt = DateTime.now());
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted) setState(() => _debugTapDetectedAt = null);
+      });
       if (state.mode == ListenMode.hum) {
         // Cantar: ENCERRA a gravação na hora (não cancela) — usa o que já
         // foi cantado até aqui pra buscar, sem esperar o silêncio ser
@@ -273,6 +289,21 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
         children: [
           const SizedBox(height: 24),
           Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
+          // DEBUG temporário — banner bem visível confirmando que o toque
+          // foi detectado (some sozinho depois de 1,2s). Remover junto com
+          // o resto da instrumentação de debug depois de achar a causa.
+          if (_debugTapDetectedAt != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(color: Colors.greenAccent, borderRadius: BorderRadius.circular(12)),
+                child: const Text(
+                  '🟢 TOQUE DETECTADO (debug)',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ),
           const Spacer(),
           // Mesmo raciocínio do botão: enquanto grava, o seletor de modo já
           // fica inerte de qualquer forma (controller.setMode ignora troca
