@@ -40,6 +40,39 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   int _cantarPhraseIndex = 0;
   String _currentNotFoundMessage = '';
 
+  // Dicas do modo Cantar durante a gravação — alternam em loop, sempre
+  // nessa ordem (não é aleatório), enquanto grava de verdade (some durante
+  // "Processando..."). Substituem tanto o texto de status quanto a dica
+  // pequena que existiam antes (duas linhas separadas) por um único texto
+  // maior, num só lugar — menos poluição visual, mais fácil de ler.
+  static const _cantarRecordingHints = [
+    'Cante o mais próximo do microfone possível.',
+    'Toque de novo para finalizar a cantoria e buscar.',
+    'Ouvindo, buscando....',
+  ];
+  static const _hintCycleInterval = Duration(seconds: 3);
+  static const _hintFadeDuration = Duration(milliseconds: 450);
+
+  Timer? _hintCycleTimer;
+  int _hintIndex = 0;
+
+  /// Começa (ou reinicia do zero) o loop de dicas do Cantar — chamado só na
+  /// transição real pra "gravando de verdade" (ver ref.listen), nunca do
+  /// build, senão reiniciaria a cada rebuild por qualquer outro motivo.
+  void _startHintCycle() {
+    _hintCycleTimer?.cancel();
+    _hintIndex = 0;
+    _hintCycleTimer = Timer.periodic(_hintCycleInterval, (_) {
+      if (!mounted) return;
+      setState(() => _hintIndex = (_hintIndex + 1) % _cantarRecordingHints.length);
+    });
+  }
+
+  void _stopHintCycle() {
+    _hintCycleTimer?.cancel();
+    _hintCycleTimer = null;
+  }
+
   /// Escolhe a próxima frase pra esse modo (alterna 1ª/2ª a cada chamada,
   /// contador independente por modo) e já avança o contador pra próxima
   /// vez. Só deve ser chamado uma vez por transição real pra "não
@@ -91,6 +124,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
 
   @override
   void dispose() {
+    _hintCycleTimer?.cancel();
     _slideController.dispose();
     super.dispose();
   }
@@ -254,6 +288,19 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       if (next.status == ListenStatus.error && next.errorMessage != null) {
         _showBrandedSnackBar(context, next.errorMessage!, solidColor: AppColors.error);
       }
+      // Loop de dicas do Cantar: só ativo enquanto grava de verdade (não
+      // durante "Processando..."). Começa/reinicia do zero só na transição
+      // real de entrada, e para assim que sai dessa condição (parou de
+      // gravar, mudou de modo, ou entrou em "Processando...").
+      final wasCantarRecording =
+          previous?.mode == ListenMode.hum && previous?.status == ListenStatus.recording && previous?.isProcessing == false;
+      final isCantarRecording =
+          next.mode == ListenMode.hum && next.status == ListenStatus.recording && !next.isProcessing;
+      if (isCantarRecording && !wasCantarRecording) {
+        _startHintCycle();
+      } else if (!isCantarRecording && wasCantarRecording) {
+        _stopHintCycle();
+      }
     });
 
     final statusLabel = switch (state.status) {
@@ -272,6 +319,10 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     };
 
     final isRecording = state.status == ListenStatus.recording;
+    // Enquanto grava de verdade no Cantar, a área de status/dica vira o
+    // loop de frases (ver _cantarRecordingHints) — substitui tanto o texto
+    // de status quanto a dica pequena que existiam separados antes.
+    final isCantarHintCycle = state.mode == ListenMode.hum && isRecording && !state.isProcessing;
 
     // Toca em qualquer lugar da tela pra encerrar a gravação (Cantar) ou
     // cancelar (Ouvir) — mesma lógica que já existia no botão, só que agora
@@ -357,20 +408,45 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
           const SizedBox(height: 24),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              statusLabel,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
-            ),
+            // Cantar gravando de verdade: loop de dicas com fade in/out
+            // entre elas (AnimatedSwitcher troca de child automaticamente
+            // com uma transição suave sempre que a key muda — aqui a key é
+            // o índice da frase atual). Fora disso, o texto de status de
+            // sempre (idle, Processando, Ouvir gravando, não encontrado,
+            // erro).
+            child: isCantarHintCycle
+                ? AnimatedSwitcher(
+                    duration: _hintFadeDuration,
+                    switchInCurve: Curves.easeIn,
+                    switchOutCurve: Curves.easeOut,
+                    transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                    child: Text(
+                      _cantarRecordingHints[_hintIndex],
+                      key: ValueKey(_hintIndex),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  )
+                : Text(
+                    statusLabel,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
+                  ),
           ),
-          // Some durante o "Processando..." — tocar nessa fase não faz mais
-          // nada (a gravação já parou, não tem o que encerrar), então a
-          // dica não deveria continuar sugerindo uma ação disponível.
-          if (state.status == ListenStatus.recording && !state.isProcessing) ...[
+          // Dica pequena só sobrevive aqui pro Ouvir (Cantar já mostra a
+          // dica equivalente dentro do próprio loop acima). Some durante o
+          // "Processando..." — tocar nessa fase não faz mais nada (a
+          // gravação já parou, não tem o que cancelar).
+          if (state.status == ListenStatus.recording && !state.isProcessing && state.mode == ListenMode.listen) ...[
             const SizedBox(height: 4),
-            Text(
-              state.mode == ListenMode.hum ? 'Toque para finalizar e buscar' : 'toca de novo pra cancelar',
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            const Text(
+              'toca de novo pra cancelar',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ],
           // TEMPORÁRIO — diagnóstico do motivo/tempo em que a gravação do
