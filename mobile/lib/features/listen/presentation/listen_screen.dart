@@ -228,18 +228,27 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       ListenStatus.error => 'Algo deu errado',
     };
 
-    return Column(
-      children: [
-        const SizedBox(height: 24),
-        Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
-        const Spacer(),
-        ModeSelector(mode: state.mode, onChanged: controller.setMode),
-        const Spacer(),
-        GestureDetector(
-          onHorizontalDragStart: _onDragStart,
-          onHorizontalDragUpdate: _onDragUpdate,
-          onHorizontalDragEnd: _onDragEnd,
-          child: AnimatedBuilder(
+    // GestureDetector envolvendo a tela inteira (não só o botão) — pedido
+    // explícito do usuário: arrastar pra trocar de modo deve funcionar
+    // tocando em qualquer parte da tela inicial (menos o menu inferior, que
+    // é um widget separado fora dessa árvore, cuidado pelo Scaffold em
+    // app.dart). `translucent` garante que até áreas "vazias" (os Spacers)
+    // respondam ao arrasto, não só onde tem conteúdo visível. Continua só o
+    // botão se movendo visualmente — o Transform.translate abaixo segue
+    // escopado só nele, o resto da tela fica parado.
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: _onDragStart,
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      child: Column(
+        children: [
+          const SizedBox(height: 24),
+          Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
+          const Spacer(),
+          ModeSelector(mode: state.mode, onChanged: controller.setMode),
+          const Spacer(),
+          AnimatedBuilder(
             animation: _slideController,
             builder: (context, child) => Transform.translate(
               offset: Offset(_buttonOffset, 0),
@@ -272,25 +281,25 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               },
             ),
           ),
-        ),
-        const SizedBox(height: 24),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Text(
-            statusLabel,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              statusLabel,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
+            ),
           ),
-        ),
-        if (state.status == ListenStatus.recording) ...[
-          const SizedBox(height: 4),
-          Text(
-            state.mode == ListenMode.hum ? 'toca pra finalizar e buscar' : 'toca de novo pra cancelar',
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-          ),
+          if (state.status == ListenStatus.recording) ...[
+            const SizedBox(height: 4),
+            Text(
+              state.mode == ListenMode.hum ? 'toca pra finalizar e buscar' : 'toca de novo pra cancelar',
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ],
+          const Spacer(flex: 2),
         ],
-        const Spacer(flex: 2),
-      ],
+      ),
     );
   }
 }
