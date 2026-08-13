@@ -122,9 +122,18 @@ class ListenController extends StateNotifier<ListenState> {
   DateTime? _silenceStartedAt;
 
   // TEMPORÁRIO — junto com debugStopReasonProvider acima, só pra
-  // diagnóstico (ver comentário lá).
+  // diagnóstico (ver comentário lá). Usuário relatou que o auto-stop de 5s
+  // de silêncio não disparou (14/ago/2026) — esses campos extras servem
+  // pra ver se a amplitude alguma vez realmente cai abaixo do piso
+  // (_silenceAmplitudeThreshold) por tempo suficiente, ou se fica sempre
+  // "presa" acima dele (ruído ambiente/AGC do microfone empurrando o piso
+  // pra cima) — sem esse dado real do aparelho, ajustar o número às cegas
+  // arrisca reintroduzir o corte prematuro que já resolvemos antes.
   DateTime? _segmentStartedAt;
   double _lastAmplitude = 0;
+  double _minAmplitudeSeen = 1.0;
+  int _maxContinuousSilenceMs = 0;
+  int _silenceInterruptedCount = 0;
 
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
@@ -171,6 +180,9 @@ class ListenController extends StateNotifier<ListenState> {
     _hasDetectedVoice = false;
     _silenceStartedAt = null;
     _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
+    _minAmplitudeSeen = 1.0; // TEMPORÁRIO
+    _maxContinuousSilenceMs = 0; // TEMPORÁRIO
+    _silenceInterruptedCount = 0; // TEMPORÁRIO
     _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
     // Sinalizador que completa cedo tanto pela detecção automática de
     // silêncio (5s calado depois de já ter cantado) quanto por um toque
@@ -184,7 +196,9 @@ class ListenController extends StateNotifier<ListenState> {
       (amp) {
         if (!_sessionActive) return;
         state = state.copyWith(amplitude: amp);
-        _lastAmplitude = amp; // TEMPORÁRIO — só pro diagnóstico
+        // TEMPORÁRIO — só pro diagnóstico
+        _lastAmplitude = amp;
+        if (amp < _minAmplitudeSeen) _minAmplitudeSeen = amp;
         if (state.mode == ListenMode.hum) {
           _checkForSilence(amp, stopEarly);
         }
@@ -210,8 +224,10 @@ class ListenController extends StateNotifier<ListenState> {
     // sinalizador nunca é usado, sempre "vence" o timer de 4s mesmo.
     if (mode == ListenMode.hum && !stopEarly.isCompleted) {
       final elapsedMs = DateTime.now().difference(_segmentStartedAt!).inMilliseconds;
-      _ref.read(debugStopReasonProvider.notifier).state =
-          'tempo máximo atingido (${elapsedMs}ms, teto ${_segmentDurationFor(mode).inSeconds}s)';
+      _ref.read(debugStopReasonProvider.notifier).state = 'tempo máximo atingido (${elapsedMs}ms, teto '
+          '${_segmentDurationFor(mode).inSeconds}s) — silêncio nunca disparou. amp. mín. vista '
+          '${_minAmplitudeSeen.toStringAsFixed(2)} (piso é $_silenceAmplitudeThreshold), maior trecho contínuo '
+          'abaixo do piso ${_maxContinuousSilenceMs}ms, interrompido ${_silenceInterruptedCount}x';
     }
     _stopEarlySignal = null;
     if (!_sessionActive) return;
@@ -280,6 +296,14 @@ class ListenController extends StateNotifier<ListenState> {
     if (stopEarly.isCompleted) return;
 
     if (amplitude >= _silenceAmplitudeThreshold) {
+      // TEMPORÁRIO — se já estava acumulando silêncio e foi interrompido
+      // por um som acima do piso antes de completar os 5s, registra o
+      // quanto chegou a acumular (pra saber se estava perto ou longe).
+      if (_silenceStartedAt != null) {
+        final stretchMs = DateTime.now().difference(_silenceStartedAt!).inMilliseconds;
+        if (stretchMs > _maxContinuousSilenceMs) _maxContinuousSilenceMs = stretchMs;
+        _silenceInterruptedCount++;
+      }
       _hasDetectedVoice = true;
       _silenceStartedAt = null; // ainda fazendo som, zera a contagem
       return;
@@ -288,7 +312,11 @@ class ListenController extends StateNotifier<ListenState> {
     if (!_hasDetectedVoice) return; // silêncio antes de começar, ignora
 
     _silenceStartedAt ??= DateTime.now();
-    if (DateTime.now().difference(_silenceStartedAt!) >= _silenceDurationToStop) {
+    final silenceElapsed = DateTime.now().difference(_silenceStartedAt!);
+    if (silenceElapsed.inMilliseconds > _maxContinuousSilenceMs) {
+      _maxContinuousSilenceMs = silenceElapsed.inMilliseconds; // TEMPORÁRIO — "recorde" em andamento
+    }
+    if (silenceElapsed >= _silenceDurationToStop) {
       // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
       final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
       _ref.read(debugStopReasonProvider.notifier).state =
@@ -312,8 +340,9 @@ class ListenController extends StateNotifier<ListenState> {
     if (signal != null && !signal.isCompleted) {
       // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
       final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
-      _ref.read(debugStopReasonProvider.notifier).state =
-          'toque manual (${elapsedMs}ms desde o início, última amplitude ${_lastAmplitude.toStringAsFixed(2)})';
+      _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
+          'amplitude ${_lastAmplitude.toStringAsFixed(2)}, mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, '
+          'maior silêncio contínuo ${_maxContinuousSilenceMs}ms, interrompido ${_silenceInterruptedCount}x)';
       signal.complete();
     }
   }
