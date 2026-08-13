@@ -56,6 +56,14 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   }
 
   static const _commitThreshold = 50.0;
+  // Enquanto grava, "arrastar pra trocar" também cancela a busca em
+  // andamento — uma ação mais "cara" que só trocar de modo parado, então
+  // pede um arrasto mais decidido (não só passar um pouco do limiar normal)
+  // pra não se confundir com um toque de finalizar que teve um leve
+  // tremor de mão. Fora da gravação continua exatamente igual, usando só
+  // _commitThreshold — ver _onDragEnd.
+  static const _cancelCommitThreshold = 90.0;
+  static const _cancelCommitVelocity = 900.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
   // já no novo modo — dá a sensação de um botão saindo e outro entrando,
   // não só um teleporte.
@@ -91,7 +99,14 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // Enquanto uma transição de troca de modo ainda está terminando, ignora
     // um novo arrasto — evita disparar duas trocas de modo encavaladas.
     if (_slideController.isAnimating) return;
-    if (ref.read(listenControllerProvider).status == ListenStatus.recording) return;
+    // Antes também bloqueava aqui se estivesse "recording" — agora o
+    // arrasto pode começar durante a gravação/processamento também, pra
+    // permitir trocar de modo na hora sem esperar terminar (ver
+    // _onDragEnd). Continua seguro coexistindo com o toque de
+    // finalizar/cancelar: um toque de verdade (sem deslocamento) nunca
+    // chega a vencer o reconhecedor de arrasto, que só assume o gesto
+    // depois de um deslocamento horizontal mínimo (touch slop do Flutter)
+    // — é exatamente isso que faz as duas coexistirem sem disputa.
 
     setState(() {
       _isDragging = true;
@@ -104,7 +119,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     setState(() => _liveDragDx += details.delta.dx);
   }
 
-  void _onDragEnd(DragEndDetails details) {
+  Future<void> _onDragEnd(DragEndDetails details) async {
     if (!_isDragging) return;
     final velocity = details.primaryVelocity ?? 0;
     final direction = _liveDragDx != 0 ? (_liveDragDx > 0 ? 1 : -1) : (velocity < 0 ? -1 : 1);
@@ -112,12 +127,33 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     final currentMode = ref.read(listenControllerProvider).mode;
     final isRecording = ref.read(listenControllerProvider).status == ListenStatus.recording;
 
-    final farEnough = _liveDragDx.abs() > _commitThreshold || velocity.abs() > 700;
-    final shouldCommit = !isRecording && farEnough && targetMode != currentMode;
+    // Fora da gravação, limiar normal (igual sempre foi). Durante a
+    // gravação, o arrasto também cancela a busca — por ser uma ação mais
+    // "cara", exige um deslocamento/velocidade maior (_cancelCommit*) pra
+    // ficar claramente diferente de um toque de finalizar com tremor leve,
+    // que o Flutter já trata como toque (não chega nem a dar início a um
+    // arrasto) sempre que o dedo não se move o suficiente pra sair da
+    // "área de toque" do próprio reconhecedor de gesto.
+    final farEnough = isRecording
+        ? (_liveDragDx.abs() > _cancelCommitThreshold || velocity.abs() > _cancelCommitVelocity)
+        : (_liveDragDx.abs() > _commitThreshold || velocity.abs() > 700);
+    // Antes o arrasto só "comitava" fora da gravação (!isRecording). Agora
+    // também comita durante "ouvindo e buscando"/"processando" — arrastar
+    // pro lado enquanto busca cancela a busca atual na hora e já troca de
+    // modo, sem precisar esperar terminar.
+    final shouldCommit = farEnough && targetMode != currentMode;
 
     setState(() => _isDragging = false);
 
     if (shouldCommit) {
+      if (isRecording) {
+        // Cancela e ESPERA terminar antes de animar a troca — cancelRecording
+        // é local (só para o microfone, sem rede), então isso é rápido e
+        // evita uma corrida em que a animação de saída (260ms) terminaria
+        // antes do cancelamento, e o setMode no fim da animação seria
+        // ignorado por ainda ver status == recording.
+        await ref.read(listenControllerProvider.notifier).cancel();
+      }
       _animateCommit(direction, targetMode);
     } else {
       _animateSpringBack();
@@ -255,25 +291,29 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // Solução definitiva pro toque de finalizar não competir com o arrasto
     // de trocar de modo — em vez de tentar prever quem "vence" a disputa de
     // gestos do Flutter (ambíguo com dois GestureDetectors sobrepostos),
-    // as duas áreas de toque ficam MUTUAMENTE EXCLUSIVAS por construção:
+    // as duas coexistem no MESMO GestureDetector e ficam naturalmente
+    // desambiguadas pelo próprio mecanismo de arena de gestos do Flutter:
     //
-    // - Arrastar (trocar de modo) só fica ativo quando NÃO está gravando
-    //   (onHorizontalDrag* viram null enquanto grava — o reconhecedor nem é
-    //   criado nessa fase).
     // - Tocar em qualquer lugar (finalizar/cancelar) só fica ativo QUANDO
-    //   está gravando (onTap só existe nesse momento).
+    //   está gravando (onTap só existe nesse momento) — igual antes.
+    // - Arrastar (trocar de modo) agora fica ativo SEMPRE, inclusive
+    //   durante "ouvindo e buscando"/"processando" — arrastar pro lado
+    //   nessas fases cancela a busca atual na hora e já troca de modo, sem
+    //   precisar esperar terminar (ver _onDragEnd). Antes ficava bloqueado
+    //   enquanto gravava.
+    // - Um toque de verdade (sem deslocamento horizontal) nunca é
+    //   confundido com arrasto: o reconhecedor de arrasto só assume o
+    //   gesto depois de um deslocamento mínimo (touch slop do Flutter),
+    //   então onTap continua disparando normalmente pra toques parados.
     // - O botão em si fica dentro de um IgnorePointer enquanto grava — o
     //   toque nele passa DIRETO pra esse GestureDetector externo, sem
     //   nenhum reconhecedor concorrente por baixo pra disputar. Garantido
     //   pelo próprio Flutter, não por suposição de prioridade de gestos.
-    //
-    // Nunca as duas funções ficam ativas ao mesmo tempo — uma nunca afeta
-    // a outra porque literalmente não coexistem.
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: !isRecording ? _onDragStart : null,
-      onHorizontalDragUpdate: !isRecording ? _onDragUpdate : null,
-      onHorizontalDragEnd: !isRecording ? _onDragEnd : null,
+      onHorizontalDragStart: _onDragStart,
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
       onTap: isRecording ? handleScreenTapWhileRecording : null,
       child: Column(
         children: [
