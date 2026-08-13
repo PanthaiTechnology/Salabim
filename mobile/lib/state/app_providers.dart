@@ -118,7 +118,14 @@ class ListenController extends StateNotifier<ListenState> {
   // próprio ambiente, e "voz"/"silêncio" são definidos como margens ACIMA
   // desse piso — o que importa é o CONTRASTE entre a voz da pessoa e o
   // fundo, não um volume absoluto.
-  static const _voiceMargin = 0.12; // acima do piso de ruído pra contar como "cantando"
+  // Testado na prática (14/ago/2026, 2ª rodada): usuário confirmou ter
+  // parado de cantar de vez e ficado calado, mas mesmo assim o maior
+  // trecho contínuo abaixo do piso de voz foi só 1300ms (interrompido 8x
+  // em ~37s) — algum ruído periódico do ambiente (ventilador, trânsito,
+  // ar-condicionado etc.) cruzava o piso de voz a cada poucos segundos e
+  // resetava a contagem. Margem e debounce abaixo aumentados a partir
+  // desse dado real, não chute.
+  static const _voiceMargin = 0.18; // acima do piso de ruído pra contar como "cantando" (era 0.12)
   // O piso desce imediatamente ao ouvir algo mais quieto que ele (silêncio
   // de verdade nunca é "ruído", então é seguro confiar na hora), mas só
   // sobe bem devagar com o tempo — caso o ambiente realmente fique mais
@@ -126,11 +133,14 @@ class ListenController extends StateNotifier<ListenState> {
   // Sem esse teto de subida, um pico alto isolado não empurra o piso (ele
   // só reage a amostras MAIS BAIXAS que o piso atual, nunca mais altas).
   static const _noiseFloorDecayPerSecond = 0.003;
-  // Ignora picos curtos de ruído (respiração, tosse rápida, clique) que
-  // cruzam o piso de voz sem a pessoa ter realmente voltado a cantar — só
-  // reseta a contagem de silêncio se o som acima do piso persistir por
-  // esse tempo mínimo.
-  static const _voiceResumeDebounce = Duration(milliseconds: 400);
+  // Ignora picos de ruído (respiração, tosse, clique, ruído ambiente
+  // periódico) que cruzam o piso de voz sem a pessoa ter realmente voltado
+  // a cantar — só reseta a contagem de silêncio se o som acima do piso
+  // persistir por esse tempo mínimo. 400ms não foi suficiente (ver acima);
+  // 1500ms dá folga confortável sobre os 1300ms observados, mantendo
+  // margem segura abaixo de qualquer frase cantada de verdade (sempre bem
+  // mais longa que isso).
+  static const _voiceResumeDebounce = Duration(milliseconds: 1500);
   static const _silenceDurationToStop = Duration(seconds: 5);
 
   double _noiseFloor = 0.0;
