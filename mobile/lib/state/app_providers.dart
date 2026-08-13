@@ -152,8 +152,14 @@ class ListenController extends StateNotifier<ListenState> {
   // confundir); quem canta mais baixo, mais perto do piso, ganha uma
   // margem mais apertada (não tem como pedir mais separação do que existe
   // fisicamente entre a voz da pessoa e o ambiente dela).
-  static const _voiceThresholdFraction = 0.35; // posição do limiar entre piso e nível de voz observado
-  static const _minVoiceMargin = 0.08; // nunca menor que isso, nem logo no início antes de calibrar
+  // Testado na prática (14/ago/2026, 5ª rodada): com fração 0.35, piso 0.07
+  // e voz calibrada em 0.34, o limiar saía em 0.165 — mais PERTO do piso de
+  // ruído do que do nível de voz, ou seja, mais fácil ainda do ruído ser
+  // confundido com voz (o oposto do que se queria). Fração corrigida pra
+  // deixar o limiar mais perto do nível de voz (mais difícil de cruzar por
+  // ruído), mantendo folga suficiente abaixo da voz de verdade.
+  static const _voiceThresholdFraction = 0.65; // posição do limiar entre piso e nível de voz observado (era 0.35)
+  static const _minVoiceMargin = 0.12; // nunca menor que isso, nem logo no início antes de calibrar (era 0.08)
   static const _voiceLevelSmoothingAlpha = 0.08; // atualização bem lenta — não deixa 1 pico desregular a estimativa
   static const _silenceDurationToStop = Duration(seconds: 5); // tamanho da janela de análise
   // Só dispara se a fração de amostras "voz" na janela ficar EM OU ABAIXO
@@ -171,8 +177,9 @@ class ListenController extends StateNotifier<ListenState> {
   // leitura (média móvel exponencial) antes de classificar voz/silêncio,
   // pra filtrar esse chacoalhar sem atrasar a resposta de verdade (janela
   // de suavização bem curta, não confundir com o debounce de 1.5s que já
-  // se mostrou problemático).
-  static const _amplitudeSmoothingAlpha = 0.3;
+  // se mostrou problemático). 0.3 sozinho não foi suficiente (testado na
+  // prática, 5ª rodada) — reduzido pra suavizar mais forte.
+  static const _amplitudeSmoothingAlpha = 0.15;
 
   double _noiseFloor = 0.0;
   DateTime _noiseFloorUpdatedAt = DateTime.now();
