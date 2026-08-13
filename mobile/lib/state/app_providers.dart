@@ -110,7 +110,16 @@ class ListenController extends StateNotifier<ListenState> {
   /// Único ponto de entrada: um toque começa a escuta contínua. Não existe
   /// um segundo toque "obrigatório" pra buscar — a busca já acontece
   /// automaticamente a cada segmento gravado.
+  ///
+  /// Guarda contra sessão dupla: bug real encontrado em teste — um toque
+  /// duplo (ou conflito entre o gesto de deslizar do botão e o toque)
+  /// conseguia disparar `startListening` duas vezes antes da UI atualizar
+  /// pra "gravando", criando duas gravações simultâneas que atropelavam
+  /// uma à outra (uma delas cortada em ~1s) e duas buscas concorrentes —
+  /// parecia resultado de cache errado, mas era sessão duplicada. Esse
+  /// `if` torna a função segura mesmo se chamada mais de uma vez seguida.
   Future<void> startListening() async {
+    if (_sessionActive) return;
     _sessionActive = true;
     state = state.copyWith(
       status: ListenStatus.recording,
