@@ -369,8 +369,7 @@ class ListenController extends StateNotifier<ListenState> {
     // amostras suficientes pra julgar a densidade.
     if (now.difference(_firstVoiceDetectedAt!) < _silenceDurationToStop) return;
 
-    final voiceCount = _recentAmplitudeSamples.where((sample) => sample.value).length;
-    final voiceFraction = voiceCount / _recentAmplitudeSamples.length;
+    final (voiceFraction, totalMs) = _computeVoiceDensity(now);
     // TEMPORÁRIO
     if (voiceFraction < _minVoiceFractionSeen) _minVoiceFractionSeen = voiceFraction;
 
@@ -378,10 +377,33 @@ class ListenController extends StateNotifier<ListenState> {
       // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
       final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
       _ref.read(debugStopReasonProvider.notifier).state = 'silêncio detectado (${elapsedMs}ms desde o início, '
-          'densidade de voz na janela ${(voiceFraction * 100).toStringAsFixed(0)}%, piso de ruído '
-          '${_noiseFloor.toStringAsFixed(2)})';
+          'densidade de voz na janela ${(voiceFraction * 100).toStringAsFixed(0)}% (janela cobriu ${totalMs}ms), '
+          'piso de ruído ${_noiseFloor.toStringAsFixed(2)})';
       stopEarly.complete();
     }
+  }
+
+  /// Densidade de voz (0.0-1.0) na janela dos últimos _silenceDurationToStop,
+  /// medida por TEMPO real (ms) que cada estado durou — não por contagem de
+  /// amostras, que assume implicitamente um intervalo perfeitamente regular
+  /// entre leituras (~100ms). Na prática esse intervalo pode não ser
+  /// regular (o app pode receber leituras em cadência irregular), o que
+  /// faria a contagem simples dar peso desigual a cada amostra e distorcer
+  /// o resultado. Somar a duração real de cada estado até a próxima leitura
+  /// (ou até agora, pra última) é imune a essa irregularidade. Retorna
+  /// também o total de ms cobertos pela janela, só pra diagnóstico
+  /// (confirma se a janela realmente está cobrindo os 5s esperados).
+  (double, int) _computeVoiceDensity(DateTime now) {
+    var voiceMs = 0;
+    var totalMs = 0;
+    for (var i = 0; i < _recentAmplitudeSamples.length; i++) {
+      final sample = _recentAmplitudeSamples[i];
+      final nextTime = i + 1 < _recentAmplitudeSamples.length ? _recentAmplitudeSamples[i + 1].key : now;
+      final dt = nextTime.difference(sample.key).inMilliseconds;
+      totalMs += dt;
+      if (sample.value) voiceMs += dt;
+    }
+    return (totalMs > 0 ? voiceMs / totalMs : 0.0, totalMs);
   }
 
   /// Toque manual do usuário pra encerrar a gravação do modo Cantar antes
@@ -398,11 +420,14 @@ class ListenController extends StateNotifier<ListenState> {
     final signal = _stopEarlySignal;
     if (signal != null && !signal.isCompleted) {
       // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
-      final elapsedMs = _segmentStartedAt != null ? DateTime.now().difference(_segmentStartedAt!).inMilliseconds : -1;
+      final now = DateTime.now();
+      final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
+      final (currentVoiceFraction, currentTotalMs) = _computeVoiceDensity(now);
       _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
           'amplitude ${_lastAmplitude.toStringAsFixed(2)}, piso de ruído ${_noiseFloor.toStringAsFixed(2)}, mín. '
-          'vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor densidade de voz vista na janela '
-          '${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
+          'vista ${_minAmplitudeSeen.toStringAsFixed(2)}, densidade de voz no momento do toque '
+          '${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela ${currentTotalMs}ms), menor densidade já '
+          'vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
       signal.complete();
     }
   }
