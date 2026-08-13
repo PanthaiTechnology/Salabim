@@ -147,9 +147,22 @@ class ListenController extends StateNotifier<ListenState> {
   // (ruído esporádico cabe folgado aqui) sem impedir a detecção; qualquer
   // canto de verdade, mesmo picotado, fica bem acima disso na prática.
   static const _silenceVoiceFractionThreshold = 0.15;
+  // Testado na prática (14/ago/2026, 3ª rodada): usuário confirmou ter
+  // ficado 7-8s em silêncio total de verdade, mas a densidade de voz na
+  // janela nunca caiu abaixo de 69% — a leitura de amplitude "pulando"
+  // entre valores baixos e altos logo depois de parar de cantar é a
+  // assinatura clássica do AGC (controle automático de ganho) do
+  // microfone "bombeando" enquanto se readapta ao silêncio, amplificando
+  // o ruído residual de forma instável por alguns segundos. Suaviza a
+  // leitura (média móvel exponencial) antes de classificar voz/silêncio,
+  // pra filtrar esse chacoalhar sem atrasar a resposta de verdade (janela
+  // de suavização bem curta, não confundir com o debounce de 1.5s que já
+  // se mostrou problemático).
+  static const _amplitudeSmoothingAlpha = 0.3;
 
   double _noiseFloor = 0.0;
   DateTime _noiseFloorUpdatedAt = DateTime.now();
+  double? _smoothedAmplitude;
   bool _hasDetectedVoice = false;
   DateTime? _firstVoiceDetectedAt;
   // Amostras (instante, era voz?) dos últimos _silenceDurationToStop —
@@ -213,6 +226,7 @@ class ListenController extends StateNotifier<ListenState> {
     _recentAmplitudeSamples.clear();
     _noiseFloor = 0.0; // recalibra do zero a cada gravação — ambiente pode ter mudado
     _noiseFloorUpdatedAt = DateTime.now();
+    _smoothedAmplitude = null;
     _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
     _minAmplitudeSeen = 1.0; // TEMPORÁRIO
     _minVoiceFractionSeen = 1.0; // TEMPORÁRIO
@@ -333,11 +347,21 @@ class ListenController extends StateNotifier<ListenState> {
     if (stopEarly.isCompleted) return;
     final now = DateTime.now();
 
+    // Suaviza a leitura bruta (média móvel exponencial, ver
+    // _amplitudeSmoothingAlpha) antes de qualquer outra coisa — filtra o
+    // "chacoalhar" do AGC do microfone sem atrasar a resposta de verdade
+    // (janela de suavização bem curta). Tudo abaixo usa esse valor
+    // suavizado, não a leitura bruta.
+    final smoothed = _smoothedAmplitude == null
+        ? amplitude
+        : _smoothedAmplitude! + (amplitude - _smoothedAmplitude!) * _amplitudeSmoothingAlpha;
+    _smoothedAmplitude = smoothed;
+
     // Recalibra o piso de ruído: desce na hora se ouvir algo mais quieto
     // que o piso atual, sobe só bem devagar com o tempo (ver comentário
     // em _noiseFloorDecayPerSecond).
-    if (amplitude <= _noiseFloor) {
-      _noiseFloor = amplitude;
+    if (smoothed <= _noiseFloor) {
+      _noiseFloor = smoothed;
       _noiseFloorUpdatedAt = now;
     } else {
       final secondsSinceUpdate = now.difference(_noiseFloorUpdatedAt).inMilliseconds / 1000.0;
@@ -349,7 +373,7 @@ class ListenController extends StateNotifier<ListenState> {
     }
 
     final voiceThreshold = (_noiseFloor + _voiceMargin).clamp(0.0, 1.0);
-    final isVoice = amplitude >= voiceThreshold;
+    final isVoice = smoothed >= voiceThreshold;
     if (isVoice) {
       _hasDetectedVoice = true;
       _firstVoiceDetectedAt ??= now;
@@ -424,10 +448,10 @@ class ListenController extends StateNotifier<ListenState> {
       final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
       final (currentVoiceFraction, currentTotalMs) = _computeVoiceDensity(now);
       _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
-          'amplitude ${_lastAmplitude.toStringAsFixed(2)}, piso de ruído ${_noiseFloor.toStringAsFixed(2)}, mín. '
-          'vista ${_minAmplitudeSeen.toStringAsFixed(2)}, densidade de voz no momento do toque '
-          '${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela ${currentTotalMs}ms), menor densidade já '
-          'vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
+          'amplitude ${_lastAmplitude.toStringAsFixed(2)} (suavizada ${(_smoothedAmplitude ?? -1).toStringAsFixed(2)}), '
+          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, '
+          'densidade de voz no momento do toque ${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela '
+          '${currentTotalMs}ms), menor densidade já vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
       signal.complete();
     }
   }
