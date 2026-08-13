@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -41,6 +43,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
 
   // DEBUG temporário — ver handleScreenTapWhileRecording no build().
   DateTime? _debugTapDetectedAt;
+  String _debugDiagnosis = '';
 
   /// Escolhe a próxima frase pra esse modo (alterna 1ª/2ª a cada chamada,
   /// contador independente por modo) e já avança o contador pra próxima
@@ -224,10 +227,13 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       ListenStatus.idle => state.mode == ListenMode.listen
           ? 'Ouça a música e... Salabim !!'
           : 'Cante ou toque a música e... Salabim !!',
-      // A busca já acontece automaticamente a cada poucos segundos, sem
-      // precisar tocar de novo — o número de tentativa é só pra dar
-      // feedback de que o app continua tentando.
-      ListenStatus.recording => 'Ouvindo e buscando... (tentativa ${state.attempt + 1})',
+      // "Processando" quando a gravação já parou de verdade e só falta a
+      // resposta do servidor — antes mostrava o mesmo texto de "ouvindo"
+      // nas duas fases, dando a impressão de gravação travada mesmo já
+      // tendo parado.
+      ListenStatus.recording => state.isProcessing
+          ? 'Processando...'
+          : 'Ouvindo e buscando... (tentativa ${state.attempt + 1})',
       ListenStatus.notFound => _currentNotFoundMessage,
       ListenStatus.error => 'Algo deu errado',
     };
@@ -246,20 +252,25 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // não busca). Remover depois de identificar a causa.
     void handleScreenTapWhileRecording() {
       HapticFeedback.mediumImpact();
-      setState(() => _debugTapDetectedAt = DateTime.now());
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (mounted) setState(() => _debugTapDetectedAt = null);
-      });
+      String diagnosis;
       if (state.mode == ListenMode.hum) {
         // Cantar: ENCERRA a gravação na hora (não cancela) — usa o que já
         // foi cantado até aqui pra buscar, sem esperar o silêncio ser
         // detectado ou o tempo máximo acabar.
-        controller.finishRecordingNow();
+        diagnosis = controller.finishRecordingNow();
       } else {
         // Ouvir: continua cancelando — a busca já acontece sozinha em
         // segmentos curtos automáticos, não precisa desse controle manual.
-        controller.cancel();
+        unawaited(controller.cancel());
+        diagnosis = 'cancelado (Ouvir)';
       }
+      setState(() {
+        _debugTapDetectedAt = DateTime.now();
+        _debugDiagnosis = diagnosis;
+      });
+      Future.delayed(const Duration(milliseconds: 2500), () {
+        if (mounted) setState(() => _debugTapDetectedAt = null);
+      });
     }
 
     // Solução definitiva pro toque de finalizar não competir com o arrasto
@@ -289,18 +300,20 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
         children: [
           const SizedBox(height: 24),
           Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
-          // DEBUG temporário — banner bem visível confirmando que o toque
-          // foi detectado (some sozinho depois de 1,2s). Remover junto com
-          // o resto da instrumentação de debug depois de achar a causa.
+          // DEBUG temporário — banner bem visível mostrando o diagnóstico
+          // exato do que aconteceu no toque (some sozinho depois de 2,5s).
+          // Remover junto com o resto da instrumentação de debug depois de
+          // achar a causa real.
           if (_debugTapDetectedAt != null)
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(color: Colors.greenAccent, borderRadius: BorderRadius.circular(12)),
-                child: const Text(
-                  '🟢 TOQUE DETECTADO (debug)',
-                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                child: Text(
+                  '🟢 $_debugDiagnosis',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ),
@@ -329,7 +342,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               child: PulseButton(
                 mode: state.mode,
                 isRecording: isRecording,
-                isProcessing: false,
+                isProcessing: state.isProcessing,
                 amplitude: state.amplitude,
                 // Só relevante quando NÃO grava (o IgnorePointer acima já
                 // bloqueia isso durante a gravação) — inicia a escuta.

@@ -28,6 +28,11 @@ class ListenState {
   final int attempt;
   final String? errorMessage;
   final Track? result;
+  // Diferencia "ainda gravando" de "gravação já parou, esperando resposta
+  // do servidor" — antes as duas fases mostravam o mesmo texto/animação
+  // ("Ouvindo e buscando...", botão pulsando), dando a impressão de que a
+  // gravação continuava mesmo depois de já ter parado de verdade.
+  final bool isProcessing;
 
   const ListenState({
     this.status = ListenStatus.idle,
@@ -36,6 +41,7 @@ class ListenState {
     this.attempt = 0,
     this.errorMessage,
     this.result,
+    this.isProcessing = false,
   });
 
   ListenState copyWith({
@@ -45,6 +51,7 @@ class ListenState {
     int? attempt,
     String? errorMessage,
     Track? result,
+    bool? isProcessing,
   }) {
     return ListenState(
       status: status ?? this.status,
@@ -53,6 +60,7 @@ class ListenState {
       attempt: attempt ?? this.attempt,
       errorMessage: errorMessage,
       result: result ?? this.result,
+      isProcessing: isProcessing ?? this.isProcessing,
     );
   }
 }
@@ -133,6 +141,7 @@ class ListenController extends StateNotifier<ListenState> {
       errorMessage: null,
       result: null,
       attempt: 0,
+      isProcessing: false,
     );
     await _recordAndSearchSegment();
   }
@@ -185,6 +194,12 @@ class ListenController extends StateNotifier<ListenState> {
     final hasMoreAttempts = currentAttempt < _maxAttemptsFor(mode);
     if (_sessionActive && hasMoreAttempts) {
       unawaited(_recordAndSearchSegment());
+    } else if (_sessionActive) {
+      // Última tentativa: não tem próximo trecho gravando em paralelo, o
+      // microfone já parou de verdade — mostra "processando" em vez de
+      // continuar parecendo que ainda está ouvindo (era a mesma aparência
+      // das duas fases antes, dava a impressão de gravação travada).
+      state = state.copyWith(isProcessing: true);
     }
 
     if (file == null) return;
@@ -197,7 +212,7 @@ class ListenController extends StateNotifier<ListenState> {
         _sessionActive = false;
         await _amplitudeSub?.cancel();
         await _recorder.cancelRecording(); // encerra o próximo trecho já em andamento
-        state = state.copyWith(status: ListenStatus.idle, result: track);
+        state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
         return;
       }
     } on IdentifyException catch (e) {
@@ -205,7 +220,7 @@ class ListenController extends StateNotifier<ListenState> {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
       await _recorder.cancelRecording();
-      state = state.copyWith(status: ListenStatus.error, errorMessage: e.message);
+      state = state.copyWith(status: ListenStatus.error, errorMessage: e.message, isProcessing: false);
       return;
     }
 
@@ -213,7 +228,7 @@ class ListenController extends StateNotifier<ListenState> {
     if (_sessionActive && !hasMoreAttempts) {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
-      state = state.copyWith(status: ListenStatus.notFound);
+      state = state.copyWith(status: ListenStatus.notFound, isProcessing: false);
       // Volta sozinho pro estado padrão depois de 5s — a mensagem de "não
       // encontrado" já é auto-explicativa na hora, não precisa ficar presa
       // na tela até o usuário tocar de novo. Só reseta se ainda estiver
@@ -254,10 +269,19 @@ class ListenController extends StateNotifier<ListenState> {
   /// máximo acabar. Usa o mesmo sinalizador que a detecção de silêncio já
   /// usa internamente — funciona exatamente como se o silêncio tivesse
   /// sido detectado nesse instante.
-  void finishRecordingNow() {
-    if (state.mode != ListenMode.hum || state.status != ListenStatus.recording) return;
+  /// DEBUG temporário: retorna um diagnóstico legível do que aconteceu
+  /// internamente, pra mostrar na UI e descobrir com certeza por que a
+  /// gravação não estava parando mesmo com o toque sendo detectado
+  /// corretamente (confirmado com banner visual no passo anterior).
+  /// Remover o retorno de String (voltar pra void) depois de achar a causa.
+  String finishRecordingNow() {
+    if (state.mode != ListenMode.hum) return 'ignorado: modo=${state.mode}';
+    if (state.status != ListenStatus.recording) return 'ignorado: status=${state.status}';
     final signal = _stopEarlySignal;
-    if (signal != null && !signal.isCompleted) signal.complete();
+    if (signal == null) return 'ERRO: _stopEarlySignal é null';
+    if (signal.isCompleted) return 'ERRO: sinal já estava completo';
+    signal.complete();
+    return 'OK: sinal completado';
   }
 
   /// Cancela a escuta antes da hora (o usuário tocou de novo no botão
