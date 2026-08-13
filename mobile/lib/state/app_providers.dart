@@ -158,8 +158,20 @@ class ListenController extends StateNotifier<ListenState> {
   // confundido com voz (o oposto do que se queria). Fração corrigida pra
   // deixar o limiar mais perto do nível de voz (mais difícil de cruzar por
   // ruído), mantendo folga suficiente abaixo da voz de verdade.
-  static const _voiceThresholdFraction = 0.65; // posição do limiar entre piso e nível de voz observado (era 0.35)
-  static const _minVoiceMargin = 0.12; // nunca menor que isso, nem logo no início antes de calibrar (era 0.08)
+  // Testado na prática (14/ago/2026, 6ª rodada): 1ª busca calibrou piso
+  // 0.07 e voz 0.81 (funcionou, disparou em 14%); 2ª busca LOGO EM SEGUIDA,
+  // no mesmo ambiente (piso recalibrou pro mesmo 0.07, prova que cada
+  // busca calibra do zero, não reaproveita a anterior), calibrou voz só
+  // 0.39 — a pessoa cantou mais baixo dessa vez. Com fração 0.65, esse
+  // "espaço" menor (0.07↔0.39) deu uma margem fina (~0.21), insuficiente
+  // de novo. A fração continua certa (calibra por sessão, como deve ser)
+  // — o que faltava era um piso MÍNIMO de margem informado pelo histórico
+  // real: em nenhum teste de hoje, em nenhum ambiente, a voz cantada
+  // ficou abaixo de ~0.33. Um mínimo de 0.22 garante folga confortável
+  // abaixo disso mesmo quando a calibração daquela sessão específica sair
+  // "curta".
+  static const _voiceThresholdFraction = 0.65; // posição do limiar entre piso e nível de voz observado
+  static const _minVoiceMargin = 0.22; // nunca menor que isso, mesmo com pouco contraste calibrado (era 0.12)
   static const _voiceLevelSmoothingAlpha = 0.08; // atualização bem lenta — não deixa 1 pico desregular a estimativa
   static const _silenceDurationToStop = Duration(seconds: 5); // tamanho da janela de análise
   // Só dispara se a fração de amostras "voz" na janela ficar EM OU ABAIXO
