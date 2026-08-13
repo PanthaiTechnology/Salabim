@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +25,45 @@ class ListenScreen extends ConsumerStatefulWidget {
 }
 
 class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerProviderStateMixin {
+  // Mensagens de "não encontrado" — sorteadas aleatoriamente, tom leve e
+  // descontraído (nunca debochando de verdade, sempre convidando a tentar
+  // de novo). Cantar zoa com o "talento" de cantor e lembra que cada
+  // tentativa ajuda a treinar o reconhecimento; Ouvir é mais sobre "não
+  // captei o som", tom diferente porque o motivo é outro (ambiente/volume,
+  // não a pessoa em si).
+  static const _notFoundMessagesHum = [
+    'Hmm, isso nem o Simon Cowell reconheceria 😂 Bora tentar de novo?',
+    'Precisando de aula de canto? 😅 Brincadeira! Cada tentativa nos ajuda a ficar mais espertos.',
+    'Tenho certeza que você canta melhor que isso! Na próxima você acerta 🎤',
+    'Essa melodia ficou só entre você e o universo 🌌 Tenta de novo?',
+    'Ainda estamos aprendendo a te entender... e você nos ajuda toda vez que tenta! 🎶',
+    'Ok, isso foi bem... experimental 🎨 Bora tentar de novo, sem vergonha!',
+    'Nem o Shazam arriscaria um palpite nessa 😂 Tenta de novo!',
+    'Confesso que fiquei confuso(a) com essa 😅 Relaxa e tenta de novo!',
+    'Uau. Só isso: uau 😳 Bora tentar de novo?',
+    'Essa música tá se escondendo bem de mim 🙈 Tenta de novo?',
+  ];
+
+  static const _notFoundMessagesListen = [
+    'Putz, não encontrei 💩 Chega mais perto da música e tenta de novo!',
+    'Eita, essa passou batido 👀 Aumenta o volume e tenta de novo!',
+    'Hmm, não rolou dessa vez 😅 Chega mais pertinho da fonte do som!',
+    'Essa foi difícil até pra mim 🕵️ Tenta de novo, mais perto do som!',
+    'Silêncio na linha por aqui... 🤫 Aumenta o volume e tenta de novo!',
+    'Essa música tá se escondendo de mim 🙈 Bora tentar de novo?',
+    'Acho que meus ouvidos digitais falharam dessa vez 😅 Tenta de novo!',
+    'Nada por aqui, capitão 🧐 Chega mais perto e tenta de novo!',
+    'Ruído demais, música de menos 📡 Tenta de novo, bem pertinho!',
+    'Essa passou voando 🚀 Tenta de novo, mais perto da fonte!',
+  ];
+
+  static final _random = Random();
+
+  String _randomNotFoundMessage(ListenMode mode) {
+    final pool = mode == ListenMode.hum ? _notFoundMessagesHum : _notFoundMessagesListen;
+    return pool[_random.nextInt(pool.length)];
+  }
+
   static const _commitThreshold = 50.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
   // já no novo modo — dá a sensação de um botão saindo e outro entrando,
@@ -120,6 +161,53 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     });
   }
 
+  /// SnackBar com a identidade visual do app (fundo surface escuro, cantos
+  /// arredondados, barrinha colorida lateral) em vez do SnackBar cinza
+  /// padrão do Material — pra qualquer mensagem parecer parte do app, não
+  /// um alerta de sistema genérico. `accent` pode ser um gradiente (mensagem
+  /// descontraída de "não encontrado", colorida por modo) ou uma cor sólida
+  /// (erro, sempre vermelho — não teria sentido "zoar" um erro de verdade).
+  void _showBrandedSnackBar(BuildContext context, String message, {Gradient? gradient, Color? solidColor}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.surface,
+        elevation: 6,
+        margin: const EdgeInsets.all(16),
+        padding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        duration: const Duration(seconds: 4),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 6,
+              decoration: BoxDecoration(
+                color: solidColor,
+                gradient: gradient,
+                borderRadius: const BorderRadius.horizontal(left: Radius.circular(18)),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                child: Text(
+                  message,
+                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, height: 1.35),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNotFoundSnackBar(BuildContext context, ListenMode mode) {
+    final gradient = mode == ListenMode.hum ? AppColors.humGradient : AppColors.listenGradient;
+    _showBrandedSnackBar(context, _randomNotFoundMessage(mode), gradient: gradient);
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(listenControllerProvider);
@@ -130,12 +218,10 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
         context.push('/result', extra: next.result).then((_) => controller.reset());
       }
       if (next.status == ListenStatus.notFound) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não reconhecemos essa música. Tenta de novo, bem pertinho da fonte de som 🎧')),
-        );
+        _showNotFoundSnackBar(context, next.mode);
       }
       if (next.status == ListenStatus.error && next.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(next.errorMessage!)));
+        _showBrandedSnackBar(context, next.errorMessage!, solidColor: AppColors.error);
       }
     });
 
