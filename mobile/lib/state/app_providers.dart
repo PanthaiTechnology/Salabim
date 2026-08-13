@@ -133,7 +133,6 @@ class ListenController extends StateNotifier<ListenState> {
   // voz de verdade. Isso tolera tanto ruído ambiente esporádico (poucas
   // amostras isoladas) quanto canto picotado (muitas amostras de voz
   // espalhadas, mesmo com pausas).
-  static const _voiceMargin = 0.18; // acima do piso de ruído pra contar como "cantando"
   // O piso desce imediatamente ao ouvir algo mais quieto que ele (silêncio
   // de verdade nunca é "ruído", então é seguro confiar na hora), mas só
   // sobe bem devagar com o tempo — caso o ambiente realmente fique mais
@@ -141,6 +140,21 @@ class ListenController extends StateNotifier<ListenState> {
   // Sem esse teto de subida, um pico alto isolado não empurra o piso (ele
   // só reage a amostras MAIS BAIXAS que o piso atual, nunca mais altas).
   static const _noiseFloorDecayPerSecond = 0.003;
+  // Testado na prática (14/ago/2026, 4ª rodada): usuário confirmou
+  // silêncio real de 7-8s com ventilador ligado e janela aberta, e mesmo
+  // assim não disparou — uma margem FIXA acima do piso (0.18) não dá conta
+  // de ambientes com ruído variável (o piso captura o valor mais baixo já
+  // visto, mas não o quanto esse ruído costuma OSCILAR). A margem virou
+  // proporcional ao CONTRASTE real entre o piso de ruído e o nível de voz
+  // do próprio usuário, calibrado a partir do canto dele mesmo assim que
+  // detectado (ver _voiceLevelEstimate) — quem canta bem mais alto que o
+  // ambiente ganha uma margem generosa (tolera ruído bem variável sem
+  // confundir); quem canta mais baixo, mais perto do piso, ganha uma
+  // margem mais apertada (não tem como pedir mais separação do que existe
+  // fisicamente entre a voz da pessoa e o ambiente dela).
+  static const _voiceThresholdFraction = 0.35; // posição do limiar entre piso e nível de voz observado
+  static const _minVoiceMargin = 0.08; // nunca menor que isso, nem logo no início antes de calibrar
+  static const _voiceLevelSmoothingAlpha = 0.08; // atualização bem lenta — não deixa 1 pico desregular a estimativa
   static const _silenceDurationToStop = Duration(seconds: 5); // tamanho da janela de análise
   // Só dispara se a fração de amostras "voz" na janela ficar EM OU ABAIXO
   // disso — 15% de uma janela de 5s equivale a até ~750ms de voz espalhada
@@ -163,6 +177,10 @@ class ListenController extends StateNotifier<ListenState> {
   double _noiseFloor = 0.0;
   DateTime _noiseFloorUpdatedAt = DateTime.now();
   double? _smoothedAmplitude;
+  // Nível de voz do próprio usuário, calibrado ao vivo a partir das
+  // amostras que já foram classificadas como voz (ver _checkForSilence) —
+  // é o outro lado do contraste piso-de-ruído/voz que define o limiar.
+  double? _voiceLevelEstimate;
   bool _hasDetectedVoice = false;
   DateTime? _firstVoiceDetectedAt;
   // Amostras (instante, era voz?) dos últimos _silenceDurationToStop —
@@ -227,6 +245,7 @@ class ListenController extends StateNotifier<ListenState> {
     _noiseFloor = 0.0; // recalibra do zero a cada gravação — ambiente pode ter mudado
     _noiseFloorUpdatedAt = DateTime.now();
     _smoothedAmplitude = null;
+    _voiceLevelEstimate = null;
     _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
     _minAmplitudeSeen = 1.0; // TEMPORÁRIO
     _minVoiceFractionSeen = 1.0; // TEMPORÁRIO
@@ -273,9 +292,9 @@ class ListenController extends StateNotifier<ListenState> {
       final elapsedMs = DateTime.now().difference(_segmentStartedAt!).inMilliseconds;
       _ref.read(debugStopReasonProvider.notifier).state = 'tempo máximo atingido (${elapsedMs}ms, teto '
           '${_segmentDurationFor(mode).inSeconds}s) — silêncio nunca disparou. piso de ruído calibrado '
-          '${_noiseFloor.toStringAsFixed(2)}, amp. mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor '
-          'densidade de voz vista na janela ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}% (dispara em '
-          '${(_silenceVoiceFractionThreshold * 100).toStringAsFixed(0)}%)';
+          '${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado ${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)}, '
+          'amp. mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor densidade de voz vista na janela '
+          '${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}% (dispara em ${(_silenceVoiceFractionThreshold * 100).toStringAsFixed(0)}%)';
     }
     _stopEarlySignal = null;
     if (!_sessionActive) return;
@@ -372,11 +391,24 @@ class ListenController extends StateNotifier<ListenState> {
       }
     }
 
-    final voiceThreshold = (_noiseFloor + _voiceMargin).clamp(0.0, 1.0);
+    // Limiar de voz = ponto entre o piso de ruído e o nível de voz do
+    // usuário (calibrado ao vivo abaixo) — o CONTRASTE real entre os dois,
+    // não uma margem fixa. Antes de calibrar (ainda não ouvimos nenhuma
+    // amostra de voz nessa gravação), usa um chute conservador só pra dar
+    // o pontapé inicial.
+    final referenceVoiceLevel = _voiceLevelEstimate ?? (_noiseFloor + 0.30);
+    final dynamicMargin =
+        (_voiceThresholdFraction * (referenceVoiceLevel - _noiseFloor)).clamp(_minVoiceMargin, 1.0);
+    final voiceThreshold = (_noiseFloor + dynamicMargin).clamp(0.0, 1.0);
     final isVoice = smoothed >= voiceThreshold;
     if (isVoice) {
       _hasDetectedVoice = true;
       _firstVoiceDetectedAt ??= now;
+      // Refina a estimativa do nível de voz do usuário com essa amostra —
+      // suaviza bem devagar, uma amostra isolada não deve desregular a
+      // calibração inteira.
+      _voiceLevelEstimate =
+          _voiceLevelEstimate == null ? smoothed : _voiceLevelEstimate! + (smoothed - _voiceLevelEstimate!) * _voiceLevelSmoothingAlpha;
     }
 
     if (!_hasDetectedVoice) return; // silêncio antes de começar a cantar, ignora
@@ -402,7 +434,8 @@ class ListenController extends StateNotifier<ListenState> {
       final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
       _ref.read(debugStopReasonProvider.notifier).state = 'silêncio detectado (${elapsedMs}ms desde o início, '
           'densidade de voz na janela ${(voiceFraction * 100).toStringAsFixed(0)}% (janela cobriu ${totalMs}ms), '
-          'piso de ruído ${_noiseFloor.toStringAsFixed(2)})';
+          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado '
+          '${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)})';
       stopEarly.complete();
     }
   }
@@ -449,9 +482,10 @@ class ListenController extends StateNotifier<ListenState> {
       final (currentVoiceFraction, currentTotalMs) = _computeVoiceDensity(now);
       _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
           'amplitude ${_lastAmplitude.toStringAsFixed(2)} (suavizada ${(_smoothedAmplitude ?? -1).toStringAsFixed(2)}), '
-          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, '
-          'densidade de voz no momento do toque ${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela '
-          '${currentTotalMs}ms), menor densidade já vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
+          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado ${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)}, '
+          'mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, densidade de voz no momento do toque '
+          '${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela ${currentTotalMs}ms), menor densidade já '
+          'vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
       signal.complete();
     }
   }
