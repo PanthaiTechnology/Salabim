@@ -240,6 +240,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
     cache_key = audio_fingerprint_key(audio_bytes, mode.value)
     cached = await get_cached_json(cache_key)
     if cached:
+        print(f"[DEBUG identify] CACHE HIT key={cache_key} audio_bytes={len(audio_bytes)}", flush=True)
         return Track.model_validate(cached)
 
     if mode == ListenMode.listen:

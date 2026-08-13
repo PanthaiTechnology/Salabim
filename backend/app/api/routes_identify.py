@@ -1,6 +1,8 @@
 """POST /v1/identify — modo "ouvir" (fingerprint) ou "hum" (cantarolar/assobiar/cantar/instrumento)."""
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 
 from app.core.cache import check_rate_limit
@@ -28,7 +30,18 @@ async def identify(
     if len(audio_bytes) > MAX_AUDIO_BYTES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Áudio muito grande (máx 10MB).")
 
+    # DEBUG temporário — investigando resposta instantânea/errada relatada
+    # no modo Cantar (ver conversa). Remover depois de identificar a causa.
+    t0 = time.monotonic()
+    print(f"[DEBUG identify] mode={mode.value} audio_bytes={len(audio_bytes)} client={client_ip}", flush=True)
+
     track = await identify_from_audio(audio_bytes, mode)
+    elapsed = time.monotonic() - t0
+    print(
+        f"[DEBUG identify] mode={mode.value} elapsed={elapsed:.2f}s "
+        f"found={track is not None} title={getattr(track, 'title', None)!r} artist={getattr(track, 'artist', None)!r}",
+        flush=True,
+    )
     if track is None:
         return IdentifyResponse(found=False, message="Não conseguimos identificar essa música. Tente gravar de novo, mais perto da fonte de som.")
     return IdentifyResponse(found=True, track=track)
