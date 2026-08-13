@@ -236,11 +236,22 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // respondam ao arrasto, não só onde tem conteúdo visível. Continua só o
     // botão se movendo visualmente — o Transform.translate abaixo segue
     // escopado só nele, o resto da tela fica parado.
+    //
+    // Bug real encontrado em teste: enquanto gravando, o botão precisa
+    // responder a TOQUE (finalizar/cancelar), mas o reconhecedor de arrasto
+    // dessa camada — agora cobrindo a tela toda, inclusive o botão — entrava
+    // na disputa de gestos e às vezes vencia antes do toque no botão chegar
+    // a disparar, mesmo com a lógica interna de _onDragStart ignorando o
+    // arrasto durante a gravação (isso só descarta o resultado, não impede
+    // o reconhecedor de "vencer" a disputa). Correção: enquanto grava, os
+    // callbacks de arrasto ficam null — aí o reconhecedor de arrasto nem é
+    // criado pra essa fase, e o toque no botão vence sem disputa nenhuma.
+    final canDrag = state.status != ListenStatus.recording;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: _onDragStart,
-      onHorizontalDragUpdate: _onDragUpdate,
-      onHorizontalDragEnd: _onDragEnd,
+      onHorizontalDragStart: canDrag ? _onDragStart : null,
+      onHorizontalDragUpdate: canDrag ? _onDragUpdate : null,
+      onHorizontalDragEnd: canDrag ? _onDragEnd : null,
       child: Column(
         children: [
           const SizedBox(height: 24),
@@ -293,7 +304,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
           if (state.status == ListenStatus.recording) ...[
             const SizedBox(height: 4),
             Text(
-              state.mode == ListenMode.hum ? 'toca pra finalizar e buscar' : 'toca de novo pra cancelar',
+              state.mode == ListenMode.hum ? 'Toque para finalizar e buscar' : 'toca de novo pra cancelar',
               style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ],
