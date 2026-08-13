@@ -23,15 +23,35 @@ class ListenScreen extends ConsumerStatefulWidget {
 }
 
 class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerProviderStateMixin {
-  // Mensagem de "não encontrado" — única (não mais sorteada), mostrada no
-  // próprio texto de status (não em SnackBar separado, que ficava
-  // redundante com a mensagem principal aparecendo duas vezes ao mesmo
-  // tempo). Some sozinha depois de 5s (ver Future.delayed em
-  // ListenController). Tom diferente por modo: Ouvir é sobre o ambiente
-  // (volume/distância do som), Cantar é sobre afinação/fidelidade à letra.
-  String _notFoundMessage(ListenMode mode) => mode == ListenMode.hum
-      ? 'putzzz, não deu... 🤦💩\nTente cantar mais afinado e mais fiel à letra possível! 😉'
-      : 'putzzz, não deu... 🤦💩\nAumente o volume ou chegue mais perto do som! 😉';
+  // Duas frases curtas por modo (não mais uma mensagem de duas linhas só —
+  // ficava grande demais), alternando a cada "não encontrado": a mesma
+  // frase de abertura pros dois modos, e uma segunda frase específica
+  // (Ouvir = ambiente/volume, Cantar = afinação/letra). Cada modo mantém
+  // sua própria posição na alternância, independente do outro — ver
+  // _nextNotFoundMessage. Some sozinha depois de 5s (Future.delayed em
+  // ListenController).
+  static const _notFoundPhrase1 = 'putzzz, não deu...Foi mau aê!! 🤦💩';
+  static const _notFoundPhraseListen2 = 'Aumente o volume ou chegue mais perto do som! 😉';
+  static const _notFoundPhraseHum2 = 'Tente cantar mais afinado e mais fiel à letra possível! 😉';
+
+  int _ouvirPhraseIndex = 0;
+  int _cantarPhraseIndex = 0;
+  String _currentNotFoundMessage = '';
+
+  /// Escolhe a próxima frase pra esse modo (alterna 1ª/2ª a cada chamada,
+  /// contador independente por modo) e já avança o contador pra próxima
+  /// vez. Só deve ser chamado uma vez por transição real pra "não
+  /// encontrado" (ver ref.listen), nunca direto de dentro do build.
+  String _nextNotFoundMessage(ListenMode mode) {
+    if (mode == ListenMode.hum) {
+      final message = _cantarPhraseIndex == 0 ? _notFoundPhrase1 : _notFoundPhraseHum2;
+      _cantarPhraseIndex = 1 - _cantarPhraseIndex;
+      return message;
+    }
+    final message = _ouvirPhraseIndex == 0 ? _notFoundPhrase1 : _notFoundPhraseListen2;
+    _ouvirPhraseIndex = 1 - _ouvirPhraseIndex;
+    return message;
+  }
 
   static const _commitThreshold = 50.0;
   // Distância que o botão "sai" da tela antes de reaparecer do lado oposto
@@ -181,6 +201,13 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       if (next.result != null && previous?.result != next.result) {
         context.push('/result', extra: next.result).then((_) => controller.reset());
       }
+      // Só escolhe a próxima frase na TRANSIÇÃO real pra "não encontrado"
+      // (nunca dentro do build, que pode rodar de novo por outros motivos
+      // e avançaria a alternância sem uma busca nova de verdade ter
+      // acontecido).
+      if (next.status == ListenStatus.notFound && previous?.status != ListenStatus.notFound) {
+        setState(() => _currentNotFoundMessage = _nextNotFoundMessage(next.mode));
+      }
       // "Não encontrado" já aparece no texto de status principal (abaixo do
       // botão) — SnackBar separada pra isso era redundante, a mesma
       // informação aparecendo duas vezes na tela ao mesmo tempo.
@@ -197,7 +224,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       // precisar tocar de novo — o número de tentativa é só pra dar
       // feedback de que o app continua tentando.
       ListenStatus.recording => 'Ouvindo e buscando... (tentativa ${state.attempt + 1})',
-      ListenStatus.notFound => _notFoundMessage(state.mode),
+      ListenStatus.notFound => _currentNotFoundMessage,
       ListenStatus.error => 'Algo deu errado',
     };
 
