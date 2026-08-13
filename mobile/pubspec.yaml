@@ -1,7 +1,7 @@
 name: salabim
 description: "Salabim — identifique qualquer música ouvindo, cantarolando, assobiando ou descrevendo."
 publish_to: "none"
-version: 0.1.6+7
+version: 0.1.7+8
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

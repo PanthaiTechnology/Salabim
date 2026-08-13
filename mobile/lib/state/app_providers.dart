@@ -102,6 +102,13 @@ class ListenController extends StateNotifier<ListenState> {
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
 
+  // Sinalizador da gravação atual (modo Cantar) — completa cedo tanto pela
+  // detecção automática de silêncio quanto por um toque manual do usuário
+  // em finishRecordingNow(). Fica em nível de instância (não só local
+  // dentro de _recordAndSearchSegment) justamente pra o toque manual
+  // conseguir alcançá-lo de fora.
+  Completer<void>? _stopEarlySignal;
+
   void setMode(ListenMode mode) {
     if (state.status == ListenStatus.recording) return;
     state = state.copyWith(mode: mode);
@@ -135,10 +142,12 @@ class ListenController extends StateNotifier<ListenState> {
 
     _hasDetectedVoice = false;
     _silenceStartedAt = null;
-    // Sinalizador que a checagem de silêncio completa cedo quando detecta
-    // 3s de silêncio depois de já ter ouvido a pessoa cantando — corrida
-    // contra o timer de duração máxima do trecho, o que vier primeiro.
+    // Sinalizador que completa cedo tanto pela detecção automática de
+    // silêncio (3s calado depois de já ter cantado) quanto por um toque
+    // manual do usuário em finishRecordingNow() — corrida contra o timer
+    // de duração máxima do trecho, o que vier primeiro.
     final stopEarly = Completer<void>();
+    _stopEarlySignal = stopEarly;
 
     await _amplitudeSub?.cancel();
     _amplitudeSub = _recorder.startRecording(mode: state.mode).listen(
@@ -163,6 +172,7 @@ class ListenController extends StateNotifier<ListenState> {
       Future.delayed(_segmentDurationFor(mode)),
       stopEarly.future,
     ]);
+    _stopEarlySignal = null;
     if (!_sessionActive) return;
 
     final file = await _recorder.stopRecording();
@@ -226,6 +236,20 @@ class ListenController extends StateNotifier<ListenState> {
     if (DateTime.now().difference(_silenceStartedAt!) >= _silenceDurationToStop) {
       stopEarly.complete();
     }
+  }
+
+  /// Toque manual do usuário pra encerrar a gravação do modo Cantar antes
+  /// da hora — sem mudar nada dos parâmetros técnicos de análise (duração
+  /// máxima, detecção de silêncio continuam do jeito que estão). Isso só
+  /// dá ao usuário um jeito de dizer "já cantei o suficiente, pode buscar
+  /// agora" sem precisar esperar o silêncio ser detectado ou o tempo
+  /// máximo acabar. Usa o mesmo sinalizador que a detecção de silêncio já
+  /// usa internamente — funciona exatamente como se o silêncio tivesse
+  /// sido detectado nesse instante.
+  void finishRecordingNow() {
+    if (state.mode != ListenMode.hum || state.status != ListenStatus.recording) return;
+    final signal = _stopEarlySignal;
+    if (signal != null && !signal.isCompleted) signal.complete();
   }
 
   /// Cancela a escuta antes da hora (o usuário tocou de novo no botão

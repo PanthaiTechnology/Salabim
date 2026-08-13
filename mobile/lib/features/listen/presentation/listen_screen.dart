@@ -175,9 +175,20 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               amplitude: state.amplitude,
               onTap: () {
                 if (state.status == ListenStatus.recording) {
-                  // Cancela antes da hora — a busca em si já acontece sozinha
-                  // enquanto grava, não é preciso tocar pra "buscar".
-                  controller.cancel();
+                  if (state.mode == ListenMode.hum) {
+                    // Cantar: toca de novo pra ENCERRAR a gravação na hora
+                    // (não cancela) — usa o que já foi cantado até aqui pra
+                    // buscar, sem precisar esperar o silêncio ser detectado
+                    // ou o tempo máximo acabar. Pedido explícito do
+                    // usuário: dar controle manual sem mudar os parâmetros
+                    // técnicos de análise (duração, silêncio) em si.
+                    controller.finishRecordingNow();
+                  } else {
+                    // Ouvir: continua cancelando — a busca já acontece
+                    // sozinha em segmentos curtos automáticos, não precisa
+                    // desse controle manual.
+                    controller.cancel();
+                  }
                 } else {
                   controller.startListening();
                 }
@@ -189,9 +200,9 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
         Text(statusLabel, style: const TextStyle(color: AppColors.textSecondary, fontSize: 15)),
         if (state.status == ListenStatus.recording) ...[
           const SizedBox(height: 4),
-          const Text(
-            'toca de novo pra cancelar',
-            style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+          Text(
+            state.mode == ListenMode.hum ? 'toca pra finalizar e buscar' : 'toca de novo pra cancelar',
+            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
           ),
         ],
         const Spacer(flex: 2),
