@@ -325,9 +325,13 @@ class ListenController extends StateNotifier<ListenState> {
     await _amplitudeSub?.cancel();
     await _recorder.cancelRecording();
     state = const ListenState();
+    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
   }
 
-  void reset() => state = ListenState(mode: state.mode);
+  void reset() {
+    state = ListenState(mode: state.mode);
+    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
+  }
 }
 
 final listenControllerProvider = StateNotifierProvider<ListenController, ListenState>((ref) {
