@@ -125,6 +125,13 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     final intensity = _smoothedVolume.clamp(0.0, 1.0);
 
     return GestureDetector(
+      // `opaque` (não o padrão `deferToChild`): sem isso, só registra toque
+      // onde tem pixel desenhado de verdade — como o botão é um círculo
+      // dentro de uma caixa quadrada de 260x260, os CANTOS da caixa (fora
+      // do círculo visível) não respondiam a toque nenhum. Bug real
+      // encontrado em teste: "toque pra finalizar" no modo Cantar às vezes
+      // não fazia nada, mesmo com o dedo dentro da área do botão.
+      behavior: HitTestBehavior.opaque,
       onTap: widget.isProcessing ? null : widget.onTap,
       child: SizedBox(
         width: 260,

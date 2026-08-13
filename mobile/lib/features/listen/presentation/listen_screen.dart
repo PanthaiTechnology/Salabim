@@ -30,7 +30,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   // sua própria posição na alternância, independente do outro — ver
   // _nextNotFoundMessage. Some sozinha depois de 5s (Future.delayed em
   // ListenController).
-  static const _notFoundPhrase1 = 'putzzz, não deu...Foi mau aê!! 🤦💩';
+  static const _notFoundPhrase1 = 'putzzz, não deu...Foi mau! 🤦💩';
   static const _notFoundPhraseListen2 = 'Aumente o volume ou chegue mais perto do som! 😉';
   static const _notFoundPhraseHum2 = 'Tente cantar mais afinado e mais fiel à letra possível! 😉';
 
@@ -228,36 +228,61 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       ListenStatus.error => 'Algo deu errado',
     };
 
-    // GestureDetector envolvendo a tela inteira (não só o botão) — pedido
-    // explícito do usuário: arrastar pra trocar de modo deve funcionar
-    // tocando em qualquer parte da tela inicial (menos o menu inferior, que
-    // é um widget separado fora dessa árvore, cuidado pelo Scaffold em
-    // app.dart). `translucent` garante que até áreas "vazias" (os Spacers)
-    // respondam ao arrasto, não só onde tem conteúdo visível. Continua só o
-    // botão se movendo visualmente — o Transform.translate abaixo segue
-    // escopado só nele, o resto da tela fica parado.
+    final isRecording = state.status == ListenStatus.recording;
+
+    // Toca em qualquer lugar da tela pra encerrar a gravação (Cantar) ou
+    // cancelar (Ouvir) — mesma lógica que já existia no botão, só que agora
+    // é a área de toque VÁLIDA pra essa ação inteira, não só o botão.
+    void handleScreenTapWhileRecording() {
+      if (state.mode == ListenMode.hum) {
+        // Cantar: ENCERRA a gravação na hora (não cancela) — usa o que já
+        // foi cantado até aqui pra buscar, sem esperar o silêncio ser
+        // detectado ou o tempo máximo acabar.
+        controller.finishRecordingNow();
+      } else {
+        // Ouvir: continua cancelando — a busca já acontece sozinha em
+        // segmentos curtos automáticos, não precisa desse controle manual.
+        controller.cancel();
+      }
+    }
+
+    // Solução definitiva pro toque de finalizar não competir com o arrasto
+    // de trocar de modo — em vez de tentar prever quem "vence" a disputa de
+    // gestos do Flutter (ambíguo com dois GestureDetectors sobrepostos),
+    // as duas áreas de toque ficam MUTUAMENTE EXCLUSIVAS por construção:
     //
-    // Bug real encontrado em teste: enquanto gravando, o botão precisa
-    // responder a TOQUE (finalizar/cancelar), mas o reconhecedor de arrasto
-    // dessa camada — agora cobrindo a tela toda, inclusive o botão — entrava
-    // na disputa de gestos e às vezes vencia antes do toque no botão chegar
-    // a disparar, mesmo com a lógica interna de _onDragStart ignorando o
-    // arrasto durante a gravação (isso só descarta o resultado, não impede
-    // o reconhecedor de "vencer" a disputa). Correção: enquanto grava, os
-    // callbacks de arrasto ficam null — aí o reconhecedor de arrasto nem é
-    // criado pra essa fase, e o toque no botão vence sem disputa nenhuma.
-    final canDrag = state.status != ListenStatus.recording;
+    // - Arrastar (trocar de modo) só fica ativo quando NÃO está gravando
+    //   (onHorizontalDrag* viram null enquanto grava — o reconhecedor nem é
+    //   criado nessa fase).
+    // - Tocar em qualquer lugar (finalizar/cancelar) só fica ativo QUANDO
+    //   está gravando (onTap só existe nesse momento).
+    // - O botão em si fica dentro de um IgnorePointer enquanto grava — o
+    //   toque nele passa DIRETO pra esse GestureDetector externo, sem
+    //   nenhum reconhecedor concorrente por baixo pra disputar. Garantido
+    //   pelo próprio Flutter, não por suposição de prioridade de gestos.
+    //
+    // Nunca as duas funções ficam ativas ao mesmo tempo — uma nunca afeta
+    // a outra porque literalmente não coexistem.
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragStart: canDrag ? _onDragStart : null,
-      onHorizontalDragUpdate: canDrag ? _onDragUpdate : null,
-      onHorizontalDragEnd: canDrag ? _onDragEnd : null,
+      onHorizontalDragStart: !isRecording ? _onDragStart : null,
+      onHorizontalDragUpdate: !isRecording ? _onDragUpdate : null,
+      onHorizontalDragEnd: !isRecording ? _onDragEnd : null,
+      onTap: isRecording ? handleScreenTapWhileRecording : null,
       child: Column(
         children: [
           const SizedBox(height: 24),
           Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
           const Spacer(),
-          ModeSelector(mode: state.mode, onChanged: controller.setMode),
+          // Mesmo raciocínio do botão: enquanto grava, o seletor de modo já
+          // fica inerte de qualquer forma (controller.setMode ignora troca
+          // durante gravação) — o IgnorePointer só garante que o toque
+          // nessa área específica da tela passe direto pro GestureDetector
+          // externo (finalizar/cancelar), sem disputa de gesto nenhuma.
+          IgnorePointer(
+            ignoring: isRecording,
+            child: ModeSelector(mode: state.mode, onChanged: controller.setMode),
+          ),
           const Spacer(),
           AnimatedBuilder(
             animation: _slideController,
@@ -265,31 +290,20 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               offset: Offset(_buttonOffset, 0),
               child: child,
             ),
-            child: PulseButton(
-              mode: state.mode,
-              isRecording: state.status == ListenStatus.recording,
-              isProcessing: false,
-              amplitude: state.amplitude,
-              onTap: () {
-                if (state.status == ListenStatus.recording) {
-                  if (state.mode == ListenMode.hum) {
-                    // Cantar: toca de novo pra ENCERRAR a gravação na hora
-                    // (não cancela) — usa o que já foi cantado até aqui pra
-                    // buscar, sem precisar esperar o silêncio ser detectado
-                    // ou o tempo máximo acabar. Pedido explícito do
-                    // usuário: dar controle manual sem mudar os parâmetros
-                    // técnicos de análise (duração, silêncio) em si.
-                    controller.finishRecordingNow();
-                  } else {
-                    // Ouvir: continua cancelando — a busca já acontece
-                    // sozinha em segmentos curtos automáticos, não precisa
-                    // desse controle manual.
-                    controller.cancel();
-                  }
-                } else {
-                  controller.startListening();
-                }
-              },
+            child: IgnorePointer(
+              // Enquanto grava, o botão fica invisível pro toque — o toque
+              // atravessa ele direto pro GestureDetector externo acima, sem
+              // nenhuma disputa de gesto possível.
+              ignoring: isRecording,
+              child: PulseButton(
+                mode: state.mode,
+                isRecording: isRecording,
+                isProcessing: false,
+                amplitude: state.amplitude,
+                // Só relevante quando NÃO grava (o IgnorePointer acima já
+                // bloqueia isso durante a gravação) — inicia a escuta.
+                onTap: controller.startListening,
+              ),
             ),
           ),
           const SizedBox(height: 24),
