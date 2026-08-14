@@ -29,12 +29,15 @@ class AppColors {
     end: Alignment.bottomRight,
   );
 
-  // Começa no mesmo roxo/lilás do "Ouvir" (e do item selecionado no menu
-  // inferior) e aprofunda pra um roxo mais escuro/saturado — sem virar azul
-  // (isso é a marca do "Ouvir") nem rosa. A diferenciação entre os modos
-  // vem de pra onde cada gradiente vai, não do ponto de partida.
+  // Começa no mesmo roxo do "Ouvir" e clareia pra um lilás — a pedido
+  // explícito do usuário (14/ago/2026), que gostou desse tom (surgiu sem
+  // querer numa tentativa anterior pro Ouvir, revertida por não bater com
+  // a logo — mas o lilás em si agradou, só pro modo errado). A
+  // diferenciação entre os modos vem de pra onde cada gradiente vai (azul
+  // pro Ouvir, lilás pro Cantar), não do ponto de partida, que os dois
+  // compartilham.
   static const LinearGradient humGradient = LinearGradient(
-    colors: [Color(0xFF7C4DFF), Color(0xFF6023D6)],
+    colors: [Color(0xFF7C4DFF), Color(0xFFAF91EA)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
