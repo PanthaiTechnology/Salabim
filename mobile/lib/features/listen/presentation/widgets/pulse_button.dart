@@ -54,10 +54,33 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
   double _wobblePhase = 0.0;
   double _wobble = 0.0;
 
+  // Animação de "Processando...": o ícone do mago some e reaparece em loop
+  // (fade + leve encolhida, nunca some por completo — sempre mantém uma
+  // presença mínima) enquanto um arco gira ao redor dele, sincronizado no
+  // mesmo controller — uma rotação completa por respiração. Um único ciclo
+  // (0 -> 1) começa E termina com o ícone 100% visível (ver
+  // _processingOpacity/_processingScale abaixo), então o loop nunca "pisca"
+  // ou dá salto perceptível na costura entre uma repetição e a próxima.
+  late final AnimationController _processingController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1700),
+  );
+
+  static final Animatable<double> _processingOpacity = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.22).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
+    TweenSequenceItem(tween: Tween(begin: 0.22, end: 1.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
+  ]);
+
+  static final Animatable<double> _processingScale = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.8).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
+    TweenSequenceItem(tween: Tween(begin: 0.8, end: 1.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
+  ]);
+
   @override
   void initState() {
     super.initState();
     if (widget.isRecording) _reactiveTicker.start();
+    if (widget.isProcessing) _processingController.repeat();
   }
 
   @override
@@ -78,6 +101,13 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     if (widget.isRecording && widget.amplitude != oldWidget.amplitude) {
       _recentSamples.add(widget.amplitude);
       if (_recentSamples.length > 8) _recentSamples.removeAt(0);
+    }
+
+    if (widget.isProcessing && !oldWidget.isProcessing) {
+      _processingController.repeat();
+    } else if (!widget.isProcessing && oldWidget.isProcessing) {
+      _processingController.stop();
+      _processingController.value = 0;
     }
   }
 
@@ -108,6 +138,7 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     _idlePulse.dispose();
     _reactiveTicker.stop();
     _reactiveTicker.dispose();
+    _processingController.dispose();
     super.dispose();
   }
 
@@ -212,14 +243,15 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                 ),
                 child: Center(
                   child: widget.isProcessing
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : Icon(
-                          widget.isRecording
-                              ? Icons.stop_rounded
-                              : (widget.mode == ListenMode.listen ? Icons.hearing_rounded : Icons.mic_rounded),
-                          color: Colors.white,
-                          size: 64,
-                        ),
+                      ? _ProcessingMark(controller: _processingController)
+                      : widget.isRecording
+                          ? const Icon(Icons.stop_rounded, color: Colors.white, size: 64)
+                          // Ícone parado: o próprio mago da identidade visual, só o
+                          // desenho branco (sem o fundo circular colorido original —
+                          // ver assets/icons/salabim_mark_white.png) por cima do
+                          // preenchimento em degradê do botão, que passa a fazer as
+                          // vezes do "círculo" do ícone original.
+                          : Image.asset('assets/icons/salabim_mark_white.png', width: 108, fit: BoxFit.contain),
                 ),
               ),
             ),
@@ -228,4 +260,81 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
       ),
     );
   }
+}
+
+/// Mago "respirando" enquanto processa: some (nunca por completo) e volta a
+/// aparecer, com um arco girando ao redor sincronizado na mesma volta —
+/// termina cada ciclo com o ícone 100% visível de novo, então o loop nunca
+/// dá um salto perceptível na costura entre uma repetição e a próxima.
+class _ProcessingMark extends StatelessWidget {
+  const _ProcessingMark({required this.controller});
+
+  final AnimationController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final opacity = _PulseButtonState._processingOpacity.evaluate(controller);
+        final scale = _PulseButtonState._processingScale.evaluate(controller);
+        // O arco fica mais aceso exatamente quando o mago está mais apagado
+        // — como se a "energia" migrasse de um pro outro — e gira uma volta
+        // inteira por respiração.
+        final arcAlpha = 0.35 + (1 - opacity) * 0.45;
+        return SizedBox(
+          width: 128,
+          height: 128,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Transform.rotate(
+                angle: controller.value * 2 * math.pi,
+                child: CustomPaint(
+                  size: const Size(122, 122),
+                  painter: _LoadingArcPainter(color: Colors.white.withValues(alpha: arcAlpha)),
+                ),
+              ),
+              Opacity(
+                opacity: opacity,
+                child: Transform.scale(
+                  scale: scale,
+                  child: Image.asset('assets/icons/salabim_mark_white.png', width: 92, fit: BoxFit.contain),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Arco de ~270° com esmaecimento gradual (SweepGradient de transparente até
+/// a cor) — o "rastro de cometa" clássico de indicadores de carregamento
+/// modernos, em vez de um círculo cheio parado.
+class _LoadingArcPainter extends CustomPainter {
+  _LoadingArcPainter({required this.color});
+
+  final Color color;
+
+  static const _sweep = math.pi * 1.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        colors: [color.withValues(alpha: 0), color],
+        startAngle: 0,
+        endAngle: _sweep,
+      ).createShader(rect);
+    canvas.drawArc(rect.deflate(3), 0, _sweep, false, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LoadingArcPainter oldDelegate) => oldDelegate.color != color;
 }

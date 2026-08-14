@@ -32,6 +32,16 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.byIcon(Icons.hearing_rounded), findsOneWidget); // ícone do modo "Ouvir" por padrão
+    // Ícone do botão principal (mesmo desenho do mago pros dois modos, só
+    // muda quando grava/processa) — não é mais um Icon de fonte de ícones.
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName == 'assets/icons/salabim_mark_white.png',
+      ),
+      findsOneWidget,
+    );
   });
 }
