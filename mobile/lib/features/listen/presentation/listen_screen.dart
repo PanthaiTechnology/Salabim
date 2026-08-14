@@ -70,7 +70,10 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   static const _hintFadeDuration = Duration(milliseconds: 420);
   // Opacidade máxima (quando "visível") abaixo de 1.0 de propósito — a
   // pedido do usuário, fica mais suave/sutil do que letra 100% "chapada".
-  static const _hintMaxOpacity = 0.85;
+  // Passou por 0.85 e 0.62 (ainda "muito alta", testado na prática) até
+  // fechar em 0.30 — ainda legível porque textPrimary tem bastante
+  // contraste com o fundo escuro do app mesmo bem mais transparente.
+  static const _hintMaxOpacity = 0.30;
 
   bool _hintCycleActive = false;
   bool _hintVisible = true;
