@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/track.dart';
@@ -50,27 +51,58 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     'Toque de novo para finalizar a cantoria e buscar.',
     'Ouvindo, buscando....',
   ];
-  static const _hintCycleInterval = Duration(seconds: 3);
-  static const _hintFadeDuration = Duration(milliseconds: 450);
+  // Tempo legível parado (opacidade 1) antes de começar a sumir.
+  static const _hintHoldDuration = Duration(milliseconds: 2200);
+  // Duração do fade — usada tanto pro "sumir" quanto pro "aparecer"
+  // (são duas animações separadas em sequência, nunca sobrepostas: a
+  // pedido explícito, nada de crossfade. Só troca a frase quando a
+  // opacidade já chegou em 0 de verdade).
+  static const _hintFadeDuration = Duration(milliseconds: 420);
 
-  Timer? _hintCycleTimer;
+  bool _hintCycleActive = false;
+  bool _hintVisible = true;
   int _hintIndex = 0;
 
   /// Começa (ou reinicia do zero) o loop de dicas do Cantar — chamado só na
   /// transição real pra "gravando de verdade" (ver ref.listen), nunca do
   /// build, senão reiniciaria a cada rebuild por qualquer outro motivo.
   void _startHintCycle() {
-    _hintCycleTimer?.cancel();
+    _hintCycleActive = true;
     _hintIndex = 0;
-    _hintCycleTimer = Timer.periodic(_hintCycleInterval, (_) {
-      if (!mounted) return;
-      setState(() => _hintIndex = (_hintIndex + 1) % _cantarRecordingHints.length);
-    });
+    _hintVisible = true;
+    _scheduleHintFadeOut();
   }
 
   void _stopHintCycle() {
-    _hintCycleTimer?.cancel();
-    _hintCycleTimer = null;
+    _hintCycleActive = false;
+  }
+
+  /// Espera o tempo de leitura e então dispara o fade-out (muda
+  /// `_hintVisible` pra false — o AnimatedOpacity na árvore reage sozinho).
+  void _scheduleHintFadeOut() {
+    Future.delayed(_hintHoldDuration, () {
+      if (!mounted || !_hintCycleActive) return;
+      setState(() => _hintVisible = false);
+    });
+  }
+
+  /// Chamado pelo AnimatedOpacity (onEnd) toda vez que uma animação de
+  /// opacidade termina — tanto o fim do fade-out quanto o fim do fade-in.
+  /// Sequência nunca sobreposta: só troca o texto quando já está 100%
+  /// invisível, só volta a esperar quando já está 100% visível de novo.
+  void _onHintFadeEnd() {
+    if (!mounted || !_hintCycleActive) return;
+    if (!_hintVisible) {
+      // Acabou de sumir de vez — troca pra próxima frase e começa a
+      // aparecer.
+      setState(() {
+        _hintIndex = (_hintIndex + 1) % _cantarRecordingHints.length;
+        _hintVisible = true;
+      });
+    } else {
+      // Acabou de aparecer de vez — fica um tempo legível e some de novo.
+      _scheduleHintFadeOut();
+    }
   }
 
   /// Escolhe a próxima frase pra esse modo (alterna 1ª/2ª a cada chamada,
@@ -124,7 +156,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
 
   @override
   void dispose() {
-    _hintCycleTimer?.cancel();
+    _hintCycleActive = false; // impede um Future.delayed pendente de agir depois do dispose
     _slideController.dispose();
     super.dispose();
   }
@@ -408,27 +440,31 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
           const SizedBox(height: 24),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            // Cantar gravando de verdade: loop de dicas com fade in/out
-            // entre elas (AnimatedSwitcher troca de child automaticamente
-            // com uma transição suave sempre que a key muda — aqui a key é
-            // o índice da frase atual). Fora disso, o texto de status de
+            // Cantar gravando de verdade: loop de dicas — some por completo
+            // (opacidade 1 -> 0), só DEPOIS troca a frase e aparece de novo
+            // (opacidade 0 -> 1). Nunca crossfade (as duas nunca ficam
+            // parcialmente visíveis ao mesmo tempo) — ver _onHintFadeEnd.
+            // Fonte "Baloo 2": redonda e bem mais robusta que a Inter do
+            // resto do app, de propósito — só aqui, pra essas dicas terem
+            // uma personalidade mais jovem/brincalhona (combina com o
+            // resto da identidade do app: o mago, os emojis) sem mudar a
+            // tipografia do app inteiro. Fora disso, o texto de status de
             // sempre (idle, Processando, Ouvir gravando, não encontrado,
-            // erro).
+            // erro), na fonte padrão.
             child: isCantarHintCycle
-                ? AnimatedSwitcher(
+                ? AnimatedOpacity(
+                    opacity: _hintVisible ? 1.0 : 0.0,
                     duration: _hintFadeDuration,
-                    switchInCurve: Curves.easeIn,
-                    switchOutCurve: Curves.easeOut,
-                    transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
+                    curve: Curves.easeInOut,
+                    onEnd: _onHintFadeEnd,
                     child: Text(
                       _cantarRecordingHints[_hintIndex],
-                      key: ValueKey(_hintIndex),
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: GoogleFonts.baloo2(
                         color: AppColors.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        height: 1.3,
                       ),
                     ),
                   )
