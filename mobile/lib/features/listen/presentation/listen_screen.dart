@@ -466,7 +466,13 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          // Espaçador flexível (não mais um SizedBox fixo de 24) — antes o
+          // texto ficava colado no botão, com um vão vazio grande sobrando
+          // embaixo, perto do menu inferior. Agora esse espaço é dividido
+          // de forma equilibrada entre "acima do texto" e "abaixo do
+          // texto" (ver Spacer no final da coluna), centralizando a dica
+          // no vão entre o botão e o menu, em vez de grudada no botão.
+          const Spacer(),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             // Gravando de verdade (qualquer modo): loop de dicas — some por
@@ -519,7 +525,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
               ),
             ),
           ],
-          const Spacer(flex: 2),
+          const Spacer(),
         ],
       ),
     );
