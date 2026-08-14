@@ -17,14 +17,13 @@ class AppColors {
   static const Color success = Color(0xFF34D399);
   static const Color error = Color(0xFFF87171);
 
-  // Testado na prática (14/ago/2026): tentativa de trocar o final azul por
-  // um lilás mais claro (achando que "combinaria mais" com a logo) foi
-  // conferida contra o PIXEL real do ícone da logo (salabim_icon.png,
-  // amostrado perto da borda do círculo pra pegar a cor "pura" do degradê,
-  // sem antialiasing) — o azul já era a cor certa, quase pixel-idêntica ao
-  // que está aqui. Revertido pro valor original.
+  // Ajustado por várias rodadas de prévia com o usuário (14/ago/2026):
+  // início num roxo mais vívido/saturado que o primary padrão (0x7C4DFF),
+  // terminando num azul mais puro — mais contraste de matiz que a versão
+  // "cor exata da logo" anterior, escolhido a dedo pelo usuário entre
+  // várias opções mostradas.
   static const LinearGradient listenGradient = LinearGradient(
-    colors: [Color(0xFF7C4DFF), Color(0xFF4D6BFF)],
+    colors: [Color(0xFF7515C7), Color(0xFF2F5CF0)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
