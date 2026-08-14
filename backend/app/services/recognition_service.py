@@ -246,12 +246,17 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         return Track.model_validate(cached)
 
     if mode == ListenMode.listen:
-        # Teste (14/ago/2026): normaliza o pico do áudio antes de mandar pro
-        # fingerprint — ver audio_utils.normalize_gain para o motivo (usuário
-        # relatou precisar chegar bem perto da caixa de som pro Ouvir
-        # reconhecer, ao contrário do Shazam). Só no modo Ouvir por enquanto;
-        # o Cantar (ACRCloud/melodia) não foi tocado.
-        normalized_bytes = await audio_utils.normalize_gain(audio_bytes, input_format="m4a")
+        # Normalização de ganho (audio_utils.normalize_gain) DESLIGADA
+        # (14/ago/2026) — testada e revertida. Teste controlado (ver
+        # ARCHITECTURE.md §4.3): no mesmo trecho onde durações maiores
+        # (16-18s) davam resultado CERTO sem normalizar, normalizar deixava
+        # o resultado ERRADO nas duas durações. Hipótese confirmada: em
+        # gravações mais longas, normalizar por PICO (não por RMS/loudness)
+        # tem mais chance de um ruído isolado dominar o cálculo e distorcer
+        # a proporção do áudio real — o oposto do que a normalização queria
+        # resolver. Função mantida em audio_utils.py (não chamada) caso
+        # valha revisitar com normalização por RMS no futuro.
+        normalized_bytes = audio_bytes
 
         # Qual provedor faz o fingerprint em si é uma troca de configuração
         # (Settings.listen_recognition_provider), não uma bifurcação de
@@ -286,7 +291,7 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             return track
 
         async with recognition_metrics.timed_attempt(mode="listen", provider="audd") as metric:
-            result = await audd_client.identify_audio(normalized_bytes, filename="audio.wav")
+            result = await audd_client.identify_audio(normalized_bytes, filename="audio.m4a")
             metric["found"] = result is not None
             if result:
                 metric["match_confidence"] = 1.0
