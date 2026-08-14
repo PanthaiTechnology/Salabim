@@ -41,47 +41,69 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   int _cantarPhraseIndex = 0;
   String _currentNotFoundMessage = '';
 
-  // Dicas do modo Cantar durante a gravação — alternam em loop, sempre
-  // nessa ordem (não é aleatório), enquanto grava de verdade (some durante
-  // "Processando..."). Substituem tanto o texto de status quanto a dica
-  // pequena que existiam antes (duas linhas separadas) por um único texto
-  // maior, num só lugar — menos poluição visual, mais fácil de ler.
+  // Dicas durante a gravação — alternam em loop, sempre nessa ordem (não é
+  // aleatório), enquanto grava de verdade em QUALQUER modo (some durante
+  // "Processando..."). Cada modo tem seu próprio conjunto de 3 frases, mas
+  // o mecanismo (ordem, tempo, fade) é o mesmo pros dois — qualquer ajuste
+  // de design daqui pra frente vale pros dois ao mesmo tempo. Substituem
+  // tanto o texto de status quanto a dica pequena que existiam antes (duas
+  // linhas separadas) por um único texto maior, num só lugar — menos
+  // poluição visual, mais fácil de ler.
   static const _cantarRecordingHints = [
     'Cante o mais próximo do microfone possível.',
     'Toque de novo para finalizar a cantoria e buscar.',
     'Ouvindo, buscando....',
   ];
-  // Tempo legível parado (opacidade 1) antes de começar a sumir.
+  static const _ouvirRecordingHints = [
+    'Aproxime o celular da caixa de som',
+    'Toque de novo para cancelar',
+    'Ouvindo, buscando....',
+  ];
+  List<String> _hintPhrasesFor(ListenMode mode) => mode == ListenMode.hum ? _cantarRecordingHints : _ouvirRecordingHints;
+
+  // Tempo legível parado (opacidade máxima) antes de começar a sumir.
   static const _hintHoldDuration = Duration(milliseconds: 2200);
   // Duração do fade — usada tanto pro "sumir" quanto pro "aparecer"
   // (são duas animações separadas em sequência, nunca sobrepostas: a
   // pedido explícito, nada de crossfade. Só troca a frase quando a
   // opacidade já chegou em 0 de verdade).
   static const _hintFadeDuration = Duration(milliseconds: 420);
+  // Opacidade máxima (quando "visível") abaixo de 1.0 de propósito — a
+  // pedido do usuário, fica mais suave/sutil do que letra 100% "chapada".
+  static const _hintMaxOpacity = 0.85;
 
   bool _hintCycleActive = false;
   bool _hintVisible = true;
   int _hintIndex = 0;
+  ListenMode _hintMode = ListenMode.listen;
+  // Só incrementa a cada start/stop — cada Future.delayed agendado carrega
+  // a geração de quando foi criado e confere contra a atual antes de agir.
+  // Evita que um fade "fantasma" de um ciclo que já parou (ex: trocou de
+  // modo bem rápido) apareça sobreposto ao ciclo novo.
+  int _hintCycleGeneration = 0;
 
-  /// Começa (ou reinicia do zero) o loop de dicas do Cantar — chamado só na
-  /// transição real pra "gravando de verdade" (ver ref.listen), nunca do
-  /// build, senão reiniciaria a cada rebuild por qualquer outro motivo.
-  void _startHintCycle() {
+  /// Começa (ou reinicia do zero) o loop de dicas pro `mode` — chamado só
+  /// na transição real pra "gravando de verdade" (ver ref.listen), nunca
+  /// do build, senão reiniciaria a cada rebuild por qualquer outro motivo.
+  void _startHintCycle(ListenMode mode) {
+    _hintCycleGeneration++;
     _hintCycleActive = true;
+    _hintMode = mode;
     _hintIndex = 0;
     _hintVisible = true;
-    _scheduleHintFadeOut();
+    _scheduleHintFadeOut(_hintCycleGeneration);
   }
 
   void _stopHintCycle() {
+    _hintCycleGeneration++;
     _hintCycleActive = false;
   }
 
   /// Espera o tempo de leitura e então dispara o fade-out (muda
   /// `_hintVisible` pra false — o AnimatedOpacity na árvore reage sozinho).
-  void _scheduleHintFadeOut() {
+  void _scheduleHintFadeOut(int generation) {
     Future.delayed(_hintHoldDuration, () {
-      if (!mounted || !_hintCycleActive) return;
+      if (!mounted || !_hintCycleActive || generation != _hintCycleGeneration) return;
       setState(() => _hintVisible = false);
     });
   }
@@ -89,19 +111,20 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   /// Chamado pelo AnimatedOpacity (onEnd) toda vez que uma animação de
   /// opacidade termina — tanto o fim do fade-out quanto o fim do fade-in.
   /// Sequência nunca sobreposta: só troca o texto quando já está 100%
-  /// invisível, só volta a esperar quando já está 100% visível de novo.
+  /// invisível, só volta a esperar quando já está na opacidade máxima de
+  /// novo.
   void _onHintFadeEnd() {
     if (!mounted || !_hintCycleActive) return;
     if (!_hintVisible) {
-      // Acabou de sumir de vez — troca pra próxima frase e começa a
-      // aparecer.
+      // Acabou de sumir de vez — troca pra próxima frase (desse modo) e
+      // começa a aparecer.
       setState(() {
-        _hintIndex = (_hintIndex + 1) % _cantarRecordingHints.length;
+        _hintIndex = (_hintIndex + 1) % _hintPhrasesFor(_hintMode).length;
         _hintVisible = true;
       });
     } else {
       // Acabou de aparecer de vez — fica um tempo legível e some de novo.
-      _scheduleHintFadeOut();
+      _scheduleHintFadeOut(_hintCycleGeneration);
     }
   }
 
@@ -320,17 +343,19 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       if (next.status == ListenStatus.error && next.errorMessage != null) {
         _showBrandedSnackBar(context, next.errorMessage!, solidColor: AppColors.error);
       }
-      // Loop de dicas do Cantar: só ativo enquanto grava de verdade (não
-      // durante "Processando..."). Começa/reinicia do zero só na transição
-      // real de entrada, e para assim que sai dessa condição (parou de
-      // gravar, mudou de modo, ou entrou em "Processando...").
-      final wasCantarRecording =
-          previous?.mode == ListenMode.hum && previous?.status == ListenStatus.recording && previous?.isProcessing == false;
-      final isCantarRecording =
-          next.mode == ListenMode.hum && next.status == ListenStatus.recording && !next.isProcessing;
-      if (isCantarRecording && !wasCantarRecording) {
-        _startHintCycle();
-      } else if (!isCantarRecording && wasCantarRecording) {
+      // Loop de dicas: ativo em QUALQUER modo enquanto grava de verdade
+      // (não durante "Processando..."). Começa/reinicia do zero só na
+      // transição real de entrada (ou se o modo mudou no meio, caso
+      // extremo que hoje não acontece na prática — trocar de modo sempre
+      // cancela a gravação antes —, mas fica protegido mesmo assim), e
+      // para assim que sai dessa condição (parou de gravar ou entrou em
+      // "Processando...").
+      final wasRecordingWithHints = previous?.status == ListenStatus.recording && previous?.isProcessing == false;
+      final isRecordingWithHints = next.status == ListenStatus.recording && !next.isProcessing;
+      final modeChangedMidCycle = wasRecordingWithHints && isRecordingWithHints && previous?.mode != next.mode;
+      if ((isRecordingWithHints && !wasRecordingWithHints) || modeChangedMidCycle) {
+        _startHintCycle(next.mode);
+      } else if (!isRecordingWithHints && wasRecordingWithHints) {
         _stopHintCycle();
       }
     });
@@ -351,10 +376,11 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     };
 
     final isRecording = state.status == ListenStatus.recording;
-    // Enquanto grava de verdade no Cantar, a área de status/dica vira o
-    // loop de frases (ver _cantarRecordingHints) — substitui tanto o texto
-    // de status quanto a dica pequena que existiam separados antes.
-    final isCantarHintCycle = state.mode == ListenMode.hum && isRecording && !state.isProcessing;
+    // Enquanto grava de verdade, em qualquer modo, a área de status/dica
+    // vira o loop de frases daquele modo (ver _hintPhrasesFor) — substitui
+    // tanto o texto de status quanto a dica pequena que existiam separados
+    // antes.
+    final isHintCycleActive = isRecording && !state.isProcessing;
 
     // Toca em qualquer lugar da tela pra encerrar a gravação (Cantar) ou
     // cancelar (Ouvir) — mesma lógica que já existia no botão, só que agora
@@ -440,25 +466,25 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
           const SizedBox(height: 24),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            // Cantar gravando de verdade: loop de dicas — some por completo
-            // (opacidade 1 -> 0), só DEPOIS troca a frase e aparece de novo
-            // (opacidade 0 -> 1). Nunca crossfade (as duas nunca ficam
-            // parcialmente visíveis ao mesmo tempo) — ver _onHintFadeEnd.
-            // Fonte "Baloo 2": redonda e bem mais robusta que a Inter do
-            // resto do app, de propósito — só aqui, pra essas dicas terem
-            // uma personalidade mais jovem/brincalhona (combina com o
-            // resto da identidade do app: o mago, os emojis) sem mudar a
-            // tipografia do app inteiro. Fora disso, o texto de status de
-            // sempre (idle, Processando, Ouvir gravando, não encontrado,
+            // Gravando de verdade (qualquer modo): loop de dicas — some por
+            // completo (opacidade máxima -> 0), só DEPOIS troca a frase e
+            // aparece de novo (0 -> opacidade máxima). Nunca crossfade (as
+            // duas nunca ficam parcialmente visíveis ao mesmo tempo) — ver
+            // _onHintFadeEnd. Fonte "Baloo 2": redonda e bem mais robusta
+            // que a Inter do resto do app, de propósito — só aqui, pra
+            // essas dicas terem uma personalidade mais jovem/brincalhona
+            // (combina com o resto da identidade do app: o mago, os
+            // emojis) sem mudar a tipografia do app inteiro. Fora disso, o
+            // texto de status de sempre (idle, Processando, não encontrado,
             // erro), na fonte padrão.
-            child: isCantarHintCycle
+            child: isHintCycleActive
                 ? AnimatedOpacity(
-                    opacity: _hintVisible ? 1.0 : 0.0,
+                    opacity: _hintVisible ? _hintMaxOpacity : 0.0,
                     duration: _hintFadeDuration,
                     curve: Curves.easeInOut,
                     onEnd: _onHintFadeEnd,
                     child: Text(
-                      _cantarRecordingHints[_hintIndex],
+                      _hintPhrasesFor(_hintMode)[_hintIndex],
                       textAlign: TextAlign.center,
                       style: GoogleFonts.baloo2(
                         color: AppColors.textPrimary,
@@ -474,17 +500,6 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
                     style: const TextStyle(color: AppColors.textSecondary, fontSize: 15),
                   ),
           ),
-          // Dica pequena só sobrevive aqui pro Ouvir (Cantar já mostra a
-          // dica equivalente dentro do próprio loop acima). Some durante o
-          // "Processando..." — tocar nessa fase não faz mais nada (a
-          // gravação já parou, não tem o que cancelar).
-          if (state.status == ListenStatus.recording && !state.isProcessing && state.mode == ListenMode.listen) ...[
-            const SizedBox(height: 4),
-            const Text(
-              'toca de novo pra cancelar',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
-            ),
-          ],
           // TEMPORÁRIO — diagnóstico do motivo/tempo em que a gravação do
           // Cantar parou (ver debugStopReasonProvider em app_providers.dart).
           // Só aparece quando há um motivo registrado nessa sessão. Remover
