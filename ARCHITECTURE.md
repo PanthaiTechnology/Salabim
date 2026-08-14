@@ -142,6 +142,70 @@ sem depender de licenciar catálogo nenhum.
   volume existir, a Fase 2 não exige reconstruir nada, só adicionar um script de
   treino + um passo de inferência no `recognition_service.py`.
 
+### 4.3 Modo "Ouvir" — investigação de latência/precisão vs. Shazam (14/ago/2026)
+
+Usuário relatou, comparando lado a lado com o Shazam no mesmo lugar/volume: o
+Ouvir demora mais, às vezes erra a música, e só reconhece com o celular bem
+perto da caixa de som — o Shazam reconhece de mais longe, mais rápido.
+Registrando aqui o que já foi investigado/testado pra não perder o contexto
+se o tema voltar.
+
+**Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
+o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
+só uma consulta compacta (poucos KB) — não o áudio gravado. O Salabim (como
+a maioria dos apps que consomem AudD/ACRCloud via API REST) grava, comprime
+e faz **upload do áudio inteiro**, e só então o provedor calcula o
+fingerprint do lado dele. Essa etapa a mais (upload de dezenas de KB +
+decodificação do lado do provedor) é tempo que o Shazam não gasta. Sample
+rate maior **não é o gargalo** — 44.1kHz já é mais que suficiente (algoritmos
+de fingerprint costumam reamostrar pra 8-16kHz internamente); bitrate do AAC
+(128kbps, padrão do pacote `record`) também não é.
+
+**O que já foi testado (todas reversíveis via git, ver mensagens de commit
+das datas citadas):**
+
+| Mudança | Resultado | Situação |
+|---|---|---|
+| Normalizar o pico do áudio antes de enviar pro fingerprint (`audio_utils.normalize_gain`, sobe o volume captado até ~0dBFS) | Usuário reportou melhora | **Mantido, ativo em produção** |
+| Trocar o provedor do Ouvir de AudD pra ACRCloud fingerprint (`Settings.listen_recognition_provider`, infraestrutura pronta pra reativar) | Pior em distância, precisão E velocidade — mas teste "sujo": a conta trial só permite 1 projeto, então rodou no mesmo projeto/chave do Cantar com o motor **combinado** (Audio Fingerprinting + Cover Song), que processa os dois motores em toda chamada | Revertido (voltou pra `audd`). Não foi um teste justo — ver "próximos passos" abaixo |
+| `AndroidAudioSource.camcorder` no lugar da fonte padrão do microfone (evita AGC/cancelamento de ruído pensado pra chamada de voz, que trata música de fundo como "ruído" a suprimir) | Piorou no teste em aparelho real | Revertido (voltou pra `AndroidAudioSource.defaultSource`) |
+| Segmento de gravação de 4s → 7s (mais contexto por tentativa, menos tentativas) | Taxa de acerto caiu pra 11% (medido, não "achismo" — ver métrica abaixo) | Revertido (voltou pra 4s / 5 tentativas) |
+
+**Infraestrutura de medição criada nesse processo** (pra parar de comparar
+mudança "por sensação" de teste manual): `backend/app/services/recognition_metrics.py`
+cronometra cada tentativa de identify (Ouvir e Cantar) e grava evento
+estruturado (modo, provedor, latência, achou ou não, confiança) no log e
+numa lista no Redis. `GET /v1/debug/identify-stats?mode=listen&provider=audd`
+agrega isso em contagem/taxa de acerto/latência média/p50/p95 — sem
+autenticação (só agregado, nada sensível). Qualquer teste futuro deve passar
+por essa métrica antes de decidir manter ou reverter.
+
+**Opção investigada e não implementada — SDK on-device do ACRCloud:**
+confirmado (docs oficiais + repositório `acrcloud/ACRCloudUniversalSDK`) que
+o SDK mobile deles calcula o fingerprint no aparelho e manda só o buffer
+compacto pro servidor — a mesma arquitetura do Shazam de verdade. Duas
+ressalvas que adiaram a decisão de implementar:
+1. **Não existe SDK oficial pra Flutter** — só Android/iOS nativo, Unity e
+   SDKs de backend. Precisaria de uma ponte nativa (Kotlin + `MethodChannel`),
+   investimento de tempo real, não uma troca de configuração.
+2. **Resolve velocidade, não necessariamente precisão** — o SDK muda só
+   *como* a pergunta chega no servidor; quem responde continua sendo o mesmo
+   motor/catálogo do ACRCloud, que no teste "sujo" acima teve precisão pior
+   que a AudD. Investir na ponte nativa antes de saber se o motor do
+   ACRCloud é preciso o suficiente isoladamente seria otimizar a coisa errada.
+
+**Próximos passos, nessa ordem, se o tema voltar:**
+1. Deixar a AudD (configuração atual) acumular alguns dias de uso real na
+   métrica — ter uma linha de base de verdade antes de qualquer teste novo.
+2. Se quiser testar o ACRCloud de forma justa: precisa de um projeto
+   **separado** (não combinado com o de Humming do Cantar) configurado só
+   com o engine "Audio Fingerprinting" — a conta trial atual não permite
+   (limite de 1 projeto); exigiria contato com o suporte deles ou plano
+   pago.
+3. Só depois de confirmar que o motor do ACRCloud é preciso o suficiente
+   isoladamente, vale considerar o investimento na ponte nativa do SDK
+   on-device (item anterior) pra também ganhar velocidade.
+
 ## 5. Fluxo de busca por texto (descrição / letra)
 
 1. `POST /v1/search/text` com `{ query, kind: "lyrics" | "description" }`.
