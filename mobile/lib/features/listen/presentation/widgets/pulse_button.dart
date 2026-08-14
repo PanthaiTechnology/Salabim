@@ -231,28 +231,69 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
             ] else
               // Usado tanto parado (idle) quanto "Processando..." — os dois
               // têm a mesma aparência de fora (só a pulsada leve de sempre),
-              // a diferença fica por conta do ícone central.
+              // a diferença fica por conta do ícone central. Os anéis finos
+              // (pedido do usuário, pra não ficar "cru"/dar um ar mais
+              // futurista) acompanham essa MESMA pulsada leve — nada de
+              // reagir ao áudio aqui, isso só acontece durante "ouvindo" de
+              // verdade (ver acima).
               AnimatedBuilder(
                 animation: _idlePulse,
                 builder: (context, _) {
-                  final scale = 1.0 + (_idlePulse.value * 0.06);
-                  return Transform.scale(
-                    scale: scale,
-                    child: Container(
-                      width: 200,
-                      height: 200,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: gradient,
-                        boxShadow: [
-                          BoxShadow(
-                            color: glowColor.withValues(alpha: 0.35),
-                            blurRadius: 40,
-                            spreadRadius: 4,
+                  final t = _idlePulse.value;
+                  final scale = 1.0 + t * 0.06;
+                  final ringScale = 1.0 + t * 0.05;
+                  final echoOpacity = 0.06 + t * 0.12;
+                  final ringOpacity = 0.10 + t * 0.18;
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Opacity(
+                        opacity: echoOpacity,
+                        child: Transform.scale(
+                          scale: ringScale + 0.02,
+                          child: Container(
+                            width: 220,
+                            height: 220,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 1.5)),
+                            ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      Opacity(
+                        opacity: ringOpacity,
+                        child: Transform.scale(
+                          scale: ringScale,
+                          child: Container(
+                            width: 220,
+                            height: 220,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 2)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Transform.scale(
+                        scale: scale,
+                        child: Container(
+                          width: 200,
+                          height: 200,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: gradient,
+                            boxShadow: [
+                              BoxShadow(
+                                color: glowColor.withValues(alpha: 0.35),
+                                blurRadius: 40,
+                                spreadRadius: 4,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 },
               ),
