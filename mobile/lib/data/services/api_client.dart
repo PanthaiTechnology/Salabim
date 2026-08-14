@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -39,33 +38,6 @@ class ApiClient {
     final formData = FormData.fromMap({
       'mode': mode.apiValue,
       'file': await MultipartFile.fromFile(audioFile.path, filename: 'clip.m4a'),
-    });
-
-    try {
-      final response = await _dio.post('/v1/identify', data: formData);
-      final found = response.data['found'] as bool;
-      if (!found) return null;
-      return Track.fromJson(response.data['track'] as Map<String, dynamic>);
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 429) {
-        throw IdentifyException('Muitas buscas seguidas — espera um instante e tenta de novo.');
-      }
-      throw IdentifyException('Não foi possível conectar ao Salabim agora. Verifica sua internet.');
-    }
-  }
-
-  /// Igual [identify], mas manda bytes já em memória em vez de um [File] —
-  /// usado pelo Ouvir em stream contínuo (ver AudioRecorderService.
-  /// startListenStream): cada checkpoint já chega como um WAV completo em
-  /// bytes, sem precisar escrever em disco só pra fazer upload.
-  Future<Track?> identifyBytes({
-    required Uint8List audioBytes,
-    required String filename,
-    required ListenMode mode,
-  }) async {
-    final formData = FormData.fromMap({
-      'mode': mode.apiValue,
-      'file': MultipartFile.fromBytes(audioBytes, filename: filename),
     });
 
     try {

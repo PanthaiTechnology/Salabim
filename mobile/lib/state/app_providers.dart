@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -77,48 +76,52 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Duração de cada trecho gravado pro Cantar. Não é mais um teto
-  /// "normal" pra parar de gravar, e sim um limite de segurança bem
-  /// folgado: o pedido explícito é que a gravação SÓ termine pelo toque
-  /// manual ("toque para finalizar e buscar") ou pelos 5s de silêncio
-  /// abaixo — quanto mais a pessoa canta, mais contexto melódico o
-  /// ACRCloud tem pra acertar, então não faz sentido cortar por tempo
-  /// enquanto ela ainda está cantando. Cantar é sempre 1 tentativa única:
-  /// uma gravação contínua tem muito mais contexto melódico pro ACRCloud
-  /// reconhecer do que várias fatiadas — testado na prática, precisão
-  /// caiu de verdade com 3 tentativas menores.
-  static const _humSegmentDuration = Duration(seconds: 60);
+  /// Ouvir: durações CRESCENTES por tentativa (não mais um número fixo
+  /// repetido) — decidido com base num teste controlado (14/ago/2026, ver
+  /// ARCHITECTURE.md §4.3): pegamos uma gravação real onde o Shazam
+  /// reconhecia e o Salabim não, e testamos o MESMO trecho na AudD com
+  /// durações crescentes a partir do início. Resultado: 4-8s não achava
+  /// nada; **10-14s achava uma música ERRADA com confiança** (o motor não
+  /// fica em silêncio quando tem contexto "no meio do caminho", ele
+  /// arrisca um palpite); só a partir de ~16s acertava de forma
+  /// consistente. Por isso a 1ª tentativa é curta (rápida pros casos
+  /// fáceis, perto da caixa — nesse patamar o teste mostrou "nada" em vez
+  /// de "errado", então é seguro tentar curto primeiro) e a 2ª pula
+  /// DIRETO pra 18s, evitando de propósito a faixa de 10-14s que se
+  /// mostrou perigosa (risco real de aceitar uma resposta errada com
+  /// confiança antes de dar tempo da tentativa longa, que é a correta,
+  /// rodar). "Parar cedo se achar rápido" já é automático: o
+  /// pipeline aceita o primeiro resultado não-vazio de qualquer tentativa,
+  /// então um acerto na 1ª tentativa (curta) encerra a sessão na hora, sem
+  /// esperar a 2ª.
+  ///
+  /// 1ª tentativa: testado 6s, depois 2s (14/ago/2026) — voltou pra 4s a
+  /// pedido do usuário, que é o valor original de antes de toda essa
+  /// rodada de ajuste e "aparentemente funcionava melhor". Continua dentro
+  /// da faixa validada como segura no teste controlado (4-8s = "nada", não
+  /// "errado").
+  static const _listenSegmentDurations = [Duration(seconds: 4), Duration(seconds: 18)];
 
-  /// Ouvir: pontos de checagem em CIMA DE UM ÚNICO STREAM CONTÍNUO (ver
-  /// _recordAndSearchListenStreaming) — o microfone nunca para/reinicia
-  /// entre eles. Decidido com base em dois testes controlados (14/ago/2026,
-  /// ver ARCHITECTURE.md §4.3):
-  ///
-  /// 1. Pegamos uma gravação real onde o Shazam reconhecia e o Salabim
-  ///    não, e testamos o MESMO trecho na AudD com durações crescentes a
-  ///    partir do início. 4-8s não achava nada; **10-14s achava uma
-  ///    música ERRADA com confiança** (o motor não fica em silêncio
-  ///    quando tem contexto "no meio do caminho", ele arrisca um
-  ///    palpite); só a partir de ~16s acertava de forma consistente. Por
-  ///    isso os checkpoints pulam DIRETO de 8s pra 18s, evitando de
-  ///    propósito a faixa perigosa de 10-14s.
-  /// 2. Testamos também colar blocos gravados SEPARADAMENTE (parar/
-  ///    reiniciar o microfone a cada bloco) pra simular checagem "2s em
-  ///    2s" — as costuras entre gravações separadas degradaram o
-  ///    suficiente pra transformar um resultado que seria certo em
-  ///    errado, nas MESMAS durações validadas acima. Por isso os
-  ///    checkpoints continuam poucos e espaçados (não "a cada 1-2s") — só
-  ///    são seguros porque vêm de um ÚNICO stream sem gap, não porque a
-  ///    frequência em si importe.
-  ///
-  /// 4s e 8s são baratos (dentro da faixa validada como "nada", nunca
-  /// "errado") — cada um é uma chance a mais de acerto rápido em casos
-  /// fáceis, sem risco. 18s é o checkpoint "confiável".
-  static const _listenCheckpoints = [
-    Duration(seconds: 4),
-    Duration(seconds: 8),
-    Duration(seconds: 18),
-  ];
+  /// Cantar usa 60s — não é mais um teto "normal" pra parar de gravar, e
+  /// sim um limite de segurança bem folgado: o pedido explícito é que a
+  /// gravação SÓ termine pelo toque manual ("toque para finalizar e
+  /// buscar") ou pelos 5s de silêncio abaixo — quanto mais a pessoa canta,
+  /// mais contexto melódico o ACRCloud tem pra acertar, então não faz
+  /// sentido cortar por tempo enquanto ela ainda está cantando.
+  Duration _segmentDurationFor(ListenMode mode, int attemptIndex) {
+    if (mode == ListenMode.hum) return const Duration(seconds: 60);
+    final i = attemptIndex.clamp(0, _listenSegmentDurations.length - 1);
+    return _listenSegmentDurations[i];
+  }
+
+  /// Quantos trechos tenta no total antes de desistir. Cantar é 1 tentativa
+  /// única: uma gravação contínua tem muito mais contexto melódico pro
+  /// ACRCloud reconhecer do que várias fatiadas — testado na prática,
+  /// precisão caiu de verdade com 3 tentativas menores. A detecção de
+  /// silêncio (abaixo) já resolve "não fica esperando à toa" sem precisar
+  /// fatiar a gravação. Ouvir: uma tentativa por duração em
+  /// _listenSegmentDurations.
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : _listenSegmentDurations.length;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
   // cantar e depois passa a maior parte dos últimos 5s calada, entende que
@@ -223,11 +226,6 @@ class ListenController extends StateNotifier<ListenState> {
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
 
-  // Handle do stream contínuo do Ouvir (ver _recordAndSearchListenStreaming)
-  // — só existe enquanto uma sessão do Ouvir está gravando. cancel()
-  // precisa alcançar ele pra encerrar a gravação real na hora.
-  ListenStreamHandle? _activeListenStream;
-
   // Sinalizador da gravação atual (modo Cantar) — completa cedo tanto pela
   // detecção automática de silêncio quanto por um toque manual do usuário
   // em finishRecordingNow(). Fica em nível de instância (não só local
@@ -261,17 +259,9 @@ class ListenController extends StateNotifier<ListenState> {
       attempt: 0,
       isProcessing: false,
     );
-    if (state.mode == ListenMode.hum) {
-      await _recordAndSearchSegment();
-    } else {
-      await _recordAndSearchListenStreaming();
-    }
+    await _recordAndSearchSegment();
   }
 
-  /// Grava e busca o modo Cantar — chamado só com state.mode == hum (o
-  /// Ouvir usa _recordAndSearchListenStreaming). Sempre 1 tentativa única
-  /// de até _humSegmentDuration, encerrada mais cedo pela detecção de
-  /// silêncio ou pelo toque manual em finishRecordingNow().
   Future<void> _recordAndSearchSegment() async {
     if (!_sessionActive) return;
 
@@ -294,7 +284,9 @@ class ListenController extends StateNotifier<ListenState> {
       (amp) {
         if (!_sessionActive) return;
         state = state.copyWith(amplitude: amp);
-        _checkForSilence(amp, stopEarly);
+        if (state.mode == ListenMode.hum) {
+          _checkForSilence(amp, stopEarly);
+        }
       },
       onError: (_) {
         _sessionActive = false;
@@ -305,20 +297,34 @@ class ListenController extends StateNotifier<ListenState> {
       },
     );
 
+    final mode = state.mode;
+    // state.attempt aqui ainda é o número de tentativas JÁ CONCLUÍDAS antes
+    // dessa gravação começar (0 na 1ª chamada) — é o índice certo pra
+    // escolher a duração crescente dessa tentativa (ver _segmentDurationFor).
     await Future.any([
-      Future.delayed(_humSegmentDuration),
+      Future.delayed(_segmentDurationFor(mode, state.attempt)),
       stopEarly.future,
     ]);
     _stopEarlySignal = null;
     if (!_sessionActive) return;
 
     final file = await _recorder.stopRecording();
-    state = state.copyWith(attempt: 1);
-    // Cantar é sempre 1 tentativa única — a gravação já parou de verdade,
-    // mostra "processando" em vez de continuar parecendo que ainda está
-    // ouvindo (era a mesma aparência das duas fases antes, dava a
-    // impressão de gravação travada).
-    if (_sessionActive) state = state.copyWith(isProcessing: true);
+    final currentAttempt = state.attempt + 1;
+    state = state.copyWith(attempt: currentAttempt);
+
+    // Já dispara a gravação do próximo trecho antes de esperar a resposta
+    // do servidor — assim a escuta continua fluida enquanto o trecho
+    // anterior é identificado em paralelo, em vez de parar-esperar-parar.
+    final hasMoreAttempts = currentAttempt < _maxAttemptsFor(mode);
+    if (_sessionActive && hasMoreAttempts) {
+      unawaited(_recordAndSearchSegment());
+    } else if (_sessionActive) {
+      // Última tentativa: não tem próximo trecho gravando em paralelo, o
+      // microfone já parou de verdade — mostra "processando" em vez de
+      // continuar parecendo que ainda está ouvindo (era a mesma aparência
+      // das duas fases antes, dava a impressão de gravação travada).
+      state = state.copyWith(isProcessing: true);
+    }
 
     if (file == null) return;
 
@@ -329,6 +335,7 @@ class ListenController extends StateNotifier<ListenState> {
       if (track != null) {
         _sessionActive = false;
         await _amplitudeSub?.cancel();
+        await _recorder.cancelRecording(); // encerra o próximo trecho já em andamento
         state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
         return;
       }
@@ -336,12 +343,13 @@ class ListenController extends StateNotifier<ListenState> {
       if (!_sessionActive) return;
       _sessionActive = false;
       await _amplitudeSub?.cancel();
+      await _recorder.cancelRecording();
       state = state.copyWith(status: ListenStatus.error, errorMessage: e.message, isProcessing: false);
       return;
     }
 
-    // Cantar é 1 tentativa única — não bateu, desiste.
-    if (_sessionActive) {
+    // Esse trecho não bateu. Se não há mais tentativas agendadas, desiste.
+    if (_sessionActive && !hasMoreAttempts) {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
       state = state.copyWith(status: ListenStatus.notFound, isProcessing: false);
@@ -354,113 +362,6 @@ class ListenController extends StateNotifier<ListenState> {
         if (state.status == ListenStatus.notFound) reset();
       });
     }
-  }
-
-  /// Grava e busca o modo Ouvir — chamado só com state.mode == listen. Um
-  /// ÚNICO stream contínuo de microfone (ver
-  /// AudioRecorderService.startListenStream), checado nos pontos de
-  /// _listenCheckpoints (4s, 8s, 18s) sem nunca parar/reiniciar a gravação
-  /// entre eles. Para na hora que qualquer checagem encontrar a música —
-  /// não precisa esperar o próximo checkpoint.
-  Future<void> _recordAndSearchListenStreaming() async {
-    if (!_sessionActive) return;
-
-    final handle = _recorder.startListenStream(checkpoints: _listenCheckpoints);
-    _activeListenStream = handle;
-    final done = Completer<void>();
-    var checkpointsSeen = 0;
-    // Já decidiu algo (achou, desistiu, deu erro) — evita processar um
-    // checkpoint que chegue depois de já ter resolvido a sessão de outro
-    // jeito (ex: cancelamento externo entre um checkpoint e o próximo).
-    var settled = false;
-
-    final ampSub = handle.amplitude.listen((amp) {
-      if (_sessionActive) state = state.copyWith(amplitude: amp);
-    });
-
-    Future<void> finishAsError(String message) async {
-      if (settled) return;
-      settled = true;
-      _sessionActive = false;
-      await handle.stop();
-      state = state.copyWith(status: ListenStatus.error, errorMessage: message, isProcessing: false);
-      if (!done.isCompleted) done.complete();
-    }
-
-    late final StreamSubscription<Uint8List> checkpointSub;
-    checkpointSub = handle.checkpoints.listen(
-      (wavBytes) async {
-        if (!_sessionActive || settled) return;
-        // Pausa até terminar de processar esse checkpoint — o checkpoint
-        // seguinte (se vier antes disso) fica em espera no stream, não é
-        // perdido (comportamento padrão de pause() em StreamSubscription).
-        checkpointSub.pause();
-
-        checkpointsSeen++;
-        state = state.copyWith(attempt: checkpointsSeen);
-        final isLastCheckpoint = checkpointsSeen >= _listenCheckpoints.length;
-        if (isLastCheckpoint) {
-          // Não tem mais nenhum checkpoint programado depois desse — já é
-          // "processando" de verdade, sem mais gravação em paralelo (mesma
-          // ideia do Cantar: evita parecer que ainda está "ouvindo" quando
-          // já não está).
-          state = state.copyWith(isProcessing: true);
-        }
-
-        try {
-          final track = await _api.identifyBytes(
-            audioBytes: wavBytes,
-            filename: 'clip.wav',
-            mode: ListenMode.listen,
-          );
-          if (!_sessionActive || settled) return;
-
-          if (track != null) {
-            settled = true;
-            _sessionActive = false;
-            await handle.stop();
-            state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
-            if (!done.isCompleted) done.complete();
-            return;
-          }
-        } on IdentifyException catch (e) {
-          await finishAsError(e.message);
-          return;
-        }
-
-        if (isLastCheckpoint) {
-          if (!settled && _sessionActive) {
-            settled = true;
-            _sessionActive = false;
-            await handle.stop();
-            state = state.copyWith(status: ListenStatus.notFound, isProcessing: false);
-            // Volta sozinho pro estado padrão depois de 5s — mesma lógica
-            // do Cantar (ver _recordAndSearchSegment).
-            Future.delayed(const Duration(seconds: 5), () {
-              if (state.status == ListenStatus.notFound) reset();
-            });
-          }
-          if (!done.isCompleted) done.complete();
-          return;
-        }
-
-        if (!settled) checkpointSub.resume();
-      },
-      onError: (Object error) {
-        final message = error is MicPermissionDeniedException
-            ? 'Precisamos da permissão do microfone para identificar a música.'
-            : 'Não foi possível gravar o áudio agora.';
-        unawaited(finishAsError(message));
-      },
-      onDone: () {
-        if (!done.isCompleted) done.complete();
-      },
-    );
-
-    await done.future;
-    await ampSub.cancel();
-    await checkpointSub.cancel();
-    _activeListenStream = null;
   }
 
   /// Roda a cada nova leitura de amplitude (a cada ~100ms) enquanto grava
@@ -581,19 +482,11 @@ class ListenController extends StateNotifier<ListenState> {
   }
 
   /// Cancela a escuta antes da hora (o usuário tocou de novo no botão
-  /// enquanto ainda estava buscando). Ouvir e Cantar gravam de jeitos
-  /// diferentes agora (stream contínuo vs arquivo) — só um dos dois
-  /// handles está ativo por vez, e usa o que existir.
+  /// enquanto ainda estava buscando).
   Future<void> cancel() async {
     _sessionActive = false;
     await _amplitudeSub?.cancel();
-    final streamHandle = _activeListenStream;
-    if (streamHandle != null) {
-      _activeListenStream = null;
-      await streamHandle.stop();
-    } else {
-      await _recorder.cancelRecording();
-    }
+    await _recorder.cancelRecording();
     state = const ListenState();
   }
 

@@ -198,26 +198,6 @@ normalização queria resolver. **Normalização desligada** (código mantido em
 `audio_utils.normalize_gain`, só não é mais chamada) — o Ouvir volta a
 mandar o áudio original pra AudD, só com as durações maiores.
 
-**Terceira correção — de gravações separadas pra stream contínuo:** a
-implementação inicial das durações crescentes usava DUAS gravações
-INDEPENDENTES (parar o microfone, gravar de novo do zero pro checkpoint
-seguinte). Testamos se dava pra checar com mais frequência (ex: a cada 1-2s)
-colando blocos gravados separadamente pra simular isso — e descobrimos que
-colar gravações separadas degrada o reconhecimento tanto quanto a
-normalização: nos MESMOS 16-18s que davam resultado certo numa gravação
-contínua, a versão colada a partir de blocos de 2s reencodados
-independentemente deu errado (mesma música errada nos dois casos: "Cristian
-Vogel - Alien Conversation"). Corrigido reescrevendo a captura do Ouvir pra
-usar `AudioRecorder.startStream` (PCM 16-bit bruto contínuo, via
-`AudioRecorderService.startListenStream`) — o microfone NUNCA para/reinicia
-entre checkpoints; a cada um (4s, 8s, 18s — ainda pulando de propósito a
-faixa perigosa de 10-14s) o app monta na hora um WAV válido (cabeçalho
-próprio) com todo o áudio acumulado até ali, sem finalizar/interromper a
-gravação real. Efeito colateral bom: também elimina o tempo "desperdiçado"
-de reiniciar do zero quando um checkpoint curto falha (antes: 4s descartados
-+ 18s novos = ~22s até o checkpoint longo; agora: só 18s, já que o stream
-nunca para).
-
 **Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
 o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
 só uma consulta compacta (poucos KB) — não o áudio gravado. O Salabim (como
