@@ -17,8 +17,16 @@ class AppColors {
   static const Color success = Color(0xFF34D399);
   static const Color error = Color(0xFFF87171);
 
+  // Testado na prática (14/ago/2026): o final azul (0xFF4D6BFF) criava um
+  // "conflito" visual — o círculo do ícone da logo é roxo puro (mesmo tom
+  // inicial daqui, 0x7C4DFF), então o Ouvir acabava parecendo uma cor
+  // diferente da identidade visual, não uma variação dela. Trocado por um
+  // lilás mais claro — mesmo tom/matiz do roxo escuro do humGradient
+  // abaixo (0x6023D6), só clareado — criando um par intencional: Cantar
+  // aprofunda pro escuro, Ouvir clareia pro lilás, os dois inequívocos como
+  // roxo/lilás (nunca azul, nunca rosa) e claramente diferentes entre si.
   static const LinearGradient listenGradient = LinearGradient(
-    colors: [Color(0xFF7C4DFF), Color(0xFF4D6BFF)],
+    colors: [Color(0xFF7C4DFF), Color(0xFFAF91EA)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

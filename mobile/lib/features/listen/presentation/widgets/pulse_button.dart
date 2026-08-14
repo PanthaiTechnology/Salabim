@@ -91,15 +91,6 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     duration: const Duration(milliseconds: 2000),
   );
 
-  // Pedido do usuário: anéis maiores e mais espaçados entre si (antes eram
-  // quase colados, só ~4px de diferença de diâmetro — agora bem distintos),
-  // e botão/ícone um pouco mais translúcidos (menos "chapado"), nos dois
-  // modos.
-  static const _innerRingSize = 236.0;
-  static const _outerRingSize = 276.0;
-  static const _buttonOpacity = 0.85;
-  static const _iconOpacity = 0.85;
-
   @override
   void initState() {
     super.initState();
@@ -204,11 +195,8 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
       behavior: HitTestBehavior.opaque,
       onTap: widget.isProcessing ? null : widget.onTap,
       child: SizedBox(
-        // Aumentado de 260 (era o mesmo que o anel externo antigo, 220,
-        // quase sem folga) pra caber os anéis maiores/mais espaçados sem
-        // cortar nas bordas.
-        width: 300,
-        height: 300,
+        width: 260,
+        height: 260,
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -220,8 +208,8 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                 child: Transform.scale(
                   scale: echoRingScale,
                   child: Container(
-                    width: _outerRingSize,
-                    height: _outerRingSize,
+                    width: 220,
+                    height: 220,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 1.5)),
@@ -232,8 +220,8 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
               Transform.scale(
                 scale: ringScale,
                 child: Container(
-                  width: _innerRingSize,
-                  height: _innerRingSize,
+                  width: 220,
+                  height: 220,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white.withValues(alpha: 0.25 + intensity * 0.35), width: 2),
@@ -262,10 +250,10 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                       Opacity(
                         opacity: echoOpacity,
                         child: Transform.scale(
-                          scale: ringScale,
+                          scale: ringScale + 0.02,
                           child: Container(
-                            width: _outerRingSize,
-                            height: _outerRingSize,
+                            width: 220,
+                            height: 220,
                             decoration: const BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 1.5)),
@@ -278,8 +266,8 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                         child: Transform.scale(
                           scale: ringScale,
                           child: Container(
-                            width: _innerRingSize,
-                            height: _innerRingSize,
+                            width: 220,
+                            height: 220,
                             decoration: const BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.fromBorderSide(BorderSide(color: Colors.white, width: 2)),
@@ -287,24 +275,21 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                           ),
                         ),
                       ),
-                      Opacity(
-                        opacity: _buttonOpacity,
-                        child: Transform.scale(
-                          scale: scale,
-                          child: Container(
-                            width: 200,
-                            height: 200,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: gradient,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: glowColor.withValues(alpha: 0.35),
-                                  blurRadius: 40,
-                                  spreadRadius: 4,
-                                ),
-                              ],
-                            ),
+                      Transform.scale(
+                        scale: scale,
+                        child: Container(
+                          width: 200,
+                          height: 200,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: gradient,
+                            boxShadow: [
+                              BoxShadow(
+                                color: glowColor.withValues(alpha: 0.35),
+                                blurRadius: 40,
+                                spreadRadius: 4,
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -314,65 +299,41 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
               ),
             Transform.scale(
               scale: activelyListening ? coreScale : 1.0,
-              // Stack em vez de Container-com-child: a opacidade reduzida do
-              // botão (_buttonOpacity) só se aplica ao PREENCHIMENTO
-              // colorido — o ícone por cima é uma camada separada, com sua
-              // própria opacidade (_iconOpacity), pra não acumular as duas
-              // reduções numa só (o pedido do usuário foi "diminua a
-              // opacidade dos botões E do ícone", duas coisas distintas).
-              child: SizedBox(
+              child: Container(
                 width: 180,
                 height: 180,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Opacity(
-                      opacity: _buttonOpacity,
-                      child: Container(
-                        width: 180,
-                        height: 180,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: gradient,
-                          boxShadow: activelyListening
-                              ? [
-                                  BoxShadow(
-                                    color: glowColor.withValues(alpha: 0.3 + intensity * 0.3),
-                                    blurRadius: 30 + intensity * 30,
-                                    spreadRadius: 2 + intensity * 8,
-                                  ),
-                                ]
-                              : null,
-                        ),
-                      ),
-                    ),
-                    activelyListening
-                        // Ouvindo de verdade (os dois modos): o mago
-                        // "respirando" com o arco girando ao redor — reforça a
-                        // identidade visual bem no momento em que o app está
-                        // de fato captando o usuário.
-                        ? _ListeningMark(controller: _listeningController)
-                        : widget.isProcessing
-                            // Processando: botão "parado" (mesmo círculo de
-                            // sempre) com o mago "carregando" — os traços de
-                            // som acendendo um a um.
-                            ? _LoadingMark(controller: _loadingController)
-                            // Ícone parado: o próprio mago da identidade
-                            // visual, só o desenho branco (sem o fundo
-                            // circular colorido original — ver
-                            // assets/icons/salabim_mark_white.png) por cima
-                            // do preenchimento em degradê do botão, que
-                            // passa a fazer as vezes do "círculo" do ícone
-                            // original.
-                            : Opacity(
-                                opacity: _iconOpacity,
-                                child: Image.asset(
-                                  'assets/icons/salabim_mark_white.png',
-                                  width: 108,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
-                  ],
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: gradient,
+                  boxShadow: activelyListening
+                      ? [
+                          BoxShadow(
+                            color: glowColor.withValues(alpha: 0.3 + intensity * 0.3),
+                            blurRadius: 30 + intensity * 30,
+                            spreadRadius: 2 + intensity * 8,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Center(
+                  child: activelyListening
+                      // Ouvindo de verdade (os dois modos): o mago
+                      // "respirando" com o arco girando ao redor — reforça a
+                      // identidade visual bem no momento em que o app está
+                      // de fato captando o usuário.
+                      ? _ListeningMark(controller: _listeningController)
+                      : widget.isProcessing
+                          // Processando: botão "parado" (mesmo círculo de
+                          // sempre) com o mago "carregando" — os traços de
+                          // som acendendo um a um.
+                          ? _LoadingMark(controller: _loadingController)
+                          // Ícone parado: o próprio mago da identidade visual,
+                          // só o desenho branco (sem o fundo circular colorido
+                          // original — ver assets/icons/salabim_mark_white.png)
+                          // por cima do preenchimento em degradê do botão, que
+                          // passa a fazer as vezes do "círculo" do ícone
+                          // original.
+                          : Image.asset('assets/icons/salabim_mark_white.png', width: 108, fit: BoxFit.contain),
                 ),
               ),
             ),
@@ -418,7 +379,7 @@ class _ListeningMark extends StatelessWidget {
                 ),
               ),
               Opacity(
-                opacity: opacity * _PulseButtonState._iconOpacity,
+                opacity: opacity,
                 child: Transform.scale(
                   scale: scale,
                   child: Image.asset('assets/icons/salabim_mark_white.png', width: 92, fit: BoxFit.contain),
@@ -468,9 +429,8 @@ class _LoadingMark extends StatelessWidget {
         final t = controller.value;
         // Respiração de opacidade contínua do mago inteiro — uma oscilação
         // suave por ciclo, nunca chega perto de sumir (fica entre 0.78 e
-        // 1.0), multiplicada pela opacidade reduzida do ícone
-        // (_iconOpacity, pedido do usuário).
-        final breathe = (1.0 - (0.5 - 0.5 * math.cos(t * 2 * math.pi)) * 0.22) * _PulseButtonState._iconOpacity;
+        // 1.0).
+        final breathe = 1.0 - (0.5 - 0.5 * math.cos(t * 2 * math.pi)) * 0.22;
 
         final wave1 = _windowOpacity(t, 0.00, 0.20, 0.80, 1.00);
         final wave2 = _windowOpacity(t, 0.20, 0.40, 0.80, 1.00);
