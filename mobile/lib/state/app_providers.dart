@@ -84,14 +84,11 @@ class ListenController extends StateNotifier<ListenState> {
   /// o ACRCloud tem pra acertar, então não faz sentido cortar por tempo
   /// enquanto ela ainda está cantando.
   ///
-  /// Ouvir: teste (14/ago/2026) subindo de 4s pra 7s — mais contexto de
-  /// áudio por tentativa tende a aumentar a chance de acerto JÁ na primeira
-  /// tentativa (motores de fingerprint costumam ficar mais confiantes com
-  /// mais segundos de música), o que pode resultar numa resposta CORRETA
-  /// mais rápida no total mesmo com cada tentativa individual demorando um
-  /// pouco mais. Se não ajudar, volta pra 4s.
+  /// Ouvir: teste com 7s (14/ago/2026, ver histórico do git) revertido —
+  /// dado real de app/services/recognition_metrics.py mostrou taxa de
+  /// acerto de só 11% com 7s (era o oposto do esperado). Voltou pra 4s.
   Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 7);
+      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 4);
 
   /// Quantos trechos tenta no total antes de desistir. Cantar é 1 tentativa
   /// única: uma gravação contínua tem muito mais contexto melódico pro
@@ -100,11 +97,9 @@ class ListenController extends StateNotifier<ListenState> {
   /// silêncio (abaixo) já resolve "não fica esperando à toa" sem precisar
   /// fatiar a gravação.
   ///
-  /// Ouvir: reduzido de 5 pra 3 tentativas junto com o aumento do segmento
-  /// pra 7s (item acima) — mantém o teto de espera total antes de desistir
-  /// parecido com o que já era (5×4s=20s -> 3×7s=21s), só reorganizando
-  /// entre "mais tentativas curtas" e "menos tentativas com mais contexto".
-  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 3;
+  /// Ouvir: voltou pra 5 (era 3 durante o teste de segmento de 7s acima,
+  /// revertido junto).
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
   // cantar e depois passa a maior parte dos últimos 5s calada, entende que
