@@ -22,6 +22,7 @@ from app.services import (
     feedback_service,
     itunes_client,
     odesli_client,
+    recognition_metrics,
     speech_client,
     spotify_client,
 )
@@ -258,7 +259,11 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         # motor de fingerprint "de música" do ACRCloud (projeto separado do
         # de Humming), pra comparar com a AudD.
         if get_settings().listen_recognition_provider == "acrcloud":
-            fp_result = await acrcloud_fingerprint_client.identify_audio(normalized_bytes)
+            async with recognition_metrics.timed_attempt(mode="listen", provider="acrcloud") as metric:
+                fp_result = await acrcloud_fingerprint_client.identify_audio(normalized_bytes)
+                metric["found"] = fp_result is not None
+                if fp_result:
+                    metric["match_confidence"] = fp_result.score
             if not fp_result:
                 return None
             track = Track(
@@ -280,7 +285,11 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             await _save_track_cache(track, source_url=None, links_resolved=True)
             return track
 
-        result = await audd_client.identify_audio(normalized_bytes, filename="audio.wav")
+        async with recognition_metrics.timed_attempt(mode="listen", provider="audd") as metric:
+            result = await audd_client.identify_audio(normalized_bytes, filename="audio.wav")
+            metric["found"] = result is not None
+            if result:
+                metric["match_confidence"] = 1.0
         if not result:
             return None
         track = Track(
@@ -335,8 +344,16 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             except (TimeoutError, asyncio.TimeoutError):
                 return ""
 
+        async def _timed_humming_call() -> list[acrcloud_client.ACRCloudResult]:
+            async with recognition_metrics.timed_attempt(mode="hum", provider="acrcloud") as metric:
+                candidates = await acrcloud_client.identify_humming_candidates(audio_bytes)
+                metric["found"] = bool(candidates)
+                if candidates:
+                    metric["match_confidence"] = max(c.score for c in candidates)
+                return candidates
+
         candidates, transcription = await asyncio.gather(
-            acrcloud_client.identify_humming_candidates(audio_bytes),
+            _timed_humming_call(),
             _transcribe_with_timeout(),
         )
         if not candidates:

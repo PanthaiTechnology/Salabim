@@ -76,24 +76,35 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Duração de cada trecho gravado e enviado pro backend. Ouvir continua
-  /// 4s (segmentos curtos, várias tentativas). Cantar agora usa 60s — não é
-  /// mais um teto "normal" pra parar de gravar, e sim um limite de
+  /// Duração de cada trecho gravado e enviado pro backend. Cantar usa 60s —
+  /// não é mais um teto "normal" pra parar de gravar, e sim um limite de
   /// segurança bem folgado: o pedido explícito é que a gravação SÓ termine
   /// pelo toque manual ("toque para finalizar e buscar") ou pelos 5s de
   /// silêncio abaixo — quanto mais a pessoa canta, mais contexto melódico
   /// o ACRCloud tem pra acertar, então não faz sentido cortar por tempo
   /// enquanto ela ainda está cantando.
+  ///
+  /// Ouvir: teste (14/ago/2026) subindo de 4s pra 7s — mais contexto de
+  /// áudio por tentativa tende a aumentar a chance de acerto JÁ na primeira
+  /// tentativa (motores de fingerprint costumam ficar mais confiantes com
+  /// mais segundos de música), o que pode resultar numa resposta CORRETA
+  /// mais rápida no total mesmo com cada tentativa individual demorando um
+  /// pouco mais. Se não ajudar, volta pra 4s.
   Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 4);
+      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 7);
 
-  /// Quantos trechos tenta no total antes de desistir. Cantar voltou a ser
-  /// 1 tentativa única: uma gravação contínua tem muito mais contexto
-  /// melódico pro ACRCloud reconhecer do que várias fatiadas — testado na
-  /// prática, precisão caiu de verdade com 3 tentativas menores. A
-  /// detecção de silêncio (abaixo) já resolve "não fica esperando à toa"
-  /// sem precisar fatiar a gravação.
-  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
+  /// Quantos trechos tenta no total antes de desistir. Cantar é 1 tentativa
+  /// única: uma gravação contínua tem muito mais contexto melódico pro
+  /// ACRCloud reconhecer do que várias fatiadas — testado na prática,
+  /// precisão caiu de verdade com 3 tentativas menores. A detecção de
+  /// silêncio (abaixo) já resolve "não fica esperando à toa" sem precisar
+  /// fatiar a gravação.
+  ///
+  /// Ouvir: reduzido de 5 pra 3 tentativas junto com o aumento do segmento
+  /// pra 7s (item acima) — mantém o teto de espera total antes de desistir
+  /// parecido com o que já era (5×4s=20s -> 3×7s=21s), só reorganizando
+  /// entre "mais tentativas curtas" e "menos tentativas com mais contexto".
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 3;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
   // cantar e depois passa a maior parte dos últimos 5s calada, entende que
