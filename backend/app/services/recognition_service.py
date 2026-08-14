@@ -17,6 +17,7 @@ from app.models.schemas import ListenMode, PlatformLink, Track
 from app.services import (
     acrcloud_client,
     audd_client,
+    audio_utils,
     feedback_service,
     itunes_client,
     odesli_client,
@@ -243,7 +244,13 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         return Track.model_validate(cached)
 
     if mode == ListenMode.listen:
-        result = await audd_client.identify_audio(audio_bytes)
+        # Teste (14/ago/2026): normaliza o pico do áudio antes de mandar pro
+        # fingerprint — ver audio_utils.normalize_gain para o motivo (usuário
+        # relatou precisar chegar bem perto da caixa de som pro Ouvir
+        # reconhecer, ao contrário do Shazam). Só no modo Ouvir por enquanto;
+        # o Cantar (ACRCloud/melodia) não foi tocado.
+        normalized_bytes = await audio_utils.normalize_gain(audio_bytes, input_format="m4a")
+        result = await audd_client.identify_audio(normalized_bytes, filename="audio.wav")
         if not result:
             return None
         track = Track(

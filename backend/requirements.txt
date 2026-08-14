@@ -23,3 +23,8 @@ openai-whisper==20250625
 
 # Correção ortográfica pra busca por texto (tolerar erro de digitação) — roda local, sem chave/custo.
 pyspellchecker==0.8.1
+
+# Normalização de ganho do áudio do modo Ouvir antes do fingerprint (ver
+# app/services/audio_utils.py) — usa o mesmo binário do ffmpeg que o Whisper
+# já exige no sistema, não precisa instalar nada além do pacote Python.
+pydub==0.25.1
