@@ -221,6 +221,41 @@ antes de considerar "provado" — um teste offline com ffmpeg/pydub valida a
 IDEIA (ex: "colar blocos separados degrada"), mas não garante que a
 IMPLEMENTAÇÃO real no pacote `record`/Android se comporta como esperado.
 
+**Mudança de estratégia — de "duração segura" pra "confirmação por
+concordância" (14/ago/2026):** depois de reverter o stream contínuo,
+confirmamos com um SEGUNDO teste real (vídeo com tela+microfone gravando
+"Psycho Pt. 2" do Russ) que o app retornou **"Fácil" de Zeke** — errado —
+com ~18s de gravação. A primeira música testada (DeadWhite) tinha dado
+CERTO com 16-18s. Duas músicas reais, mesma duração, resultados opostos:
+**confirma que não existe duração "segura" universal** — o ponto de corte
+varia por música, ruído ambiente e distância da fonte, então qualquer
+número fixo (curto ou longo) vai estar certo pra uma situação e errado pra
+outra.
+
+Mudança de critério de aceitação (pedido direto do usuário — "não pode ser
+universal... a única coisa que tem que acontecer é: reconhecer a música
+certa, e assim que reconhecer, enviar"): em vez de aceitar a PRIMEIRA
+resposta não-vazia de qualquer tentativa, o Ouvir agora exige que **duas
+tentativas independentes concordem** no mesmo resultado (mesmo
+`track.id`) antes de aceitar. Um acerto de verdade tende a se repetir
+conforme mais contexto é dado ao motor; um palpite errado isolado
+raramente se repete de forma idêntica numa tentativa seguinte
+independente. Isso se autoajusta por música/ambiente sem precisar
+adivinhar limiar nenhum:
+
+- Caso fácil (perto, alto, música "fácil" de reconhecer): as 2 primeiras
+  tentativas (4s, 8s) já tendem a concordar — confirma rápido.
+- Caso difícil: leva mais tentativas até 2 baterem — mais lento, mas não
+  aceita um palpite errado isolado no caminho.
+
+`_listenSegmentDurations` ampliado pra 5 tentativas crescentes (4s, 8s,
+12s, 16s, 20s — mais chances de encontrar 2 que concordem);
+`_listenCandidates` guarda os resultados não-vazios já vistos na sessão;
+`_recordAndSearchSegment` só aceita quando o resultado da tentativa atual
+já apareceu antes na lista. Cantar não foi tocado (continua aceitando a
+1ª resposta — o motor dele já combina melodia+letra no backend, não
+precisa dessa confirmação extra).
+
 **Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
 o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
 só uma consulta compacta (poucos KB) — não o áudio gravado. O Salabim (como

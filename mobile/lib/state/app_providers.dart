@@ -76,31 +76,29 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Ouvir: durações CRESCENTES por tentativa (não mais um número fixo
-  /// repetido) — decidido com base num teste controlado (14/ago/2026, ver
-  /// ARCHITECTURE.md §4.3): pegamos uma gravação real onde o Shazam
-  /// reconhecia e o Salabim não, e testamos o MESMO trecho na AudD com
-  /// durações crescentes a partir do início. Resultado: 4-8s não achava
-  /// nada; **10-14s achava uma música ERRADA com confiança** (o motor não
-  /// fica em silêncio quando tem contexto "no meio do caminho", ele
-  /// arrisca um palpite); só a partir de ~16s acertava de forma
-  /// consistente. Por isso a 1ª tentativa é curta (rápida pros casos
-  /// fáceis, perto da caixa — nesse patamar o teste mostrou "nada" em vez
-  /// de "errado", então é seguro tentar curto primeiro) e a 2ª pula
-  /// DIRETO pra 18s, evitando de propósito a faixa de 10-14s que se
-  /// mostrou perigosa (risco real de aceitar uma resposta errada com
-  /// confiança antes de dar tempo da tentativa longa, que é a correta,
-  /// rodar). "Parar cedo se achar rápido" já é automático: o
-  /// pipeline aceita o primeiro resultado não-vazio de qualquer tentativa,
-  /// então um acerto na 1ª tentativa (curta) encerra a sessão na hora, sem
-  /// esperar a 2ª.
+  /// Ouvir: durações crescentes por tentativa. Mudança de estratégia
+  /// (14/ago/2026, ver ARCHITECTURE.md §4.3) depois de confirmar com DOIS
+  /// testes reais (músicas diferentes) que **não existe uma duração
+  /// "segura" universal** — pra uma música 16-18s acertava, pra outra
+  /// (Russ - Psycho Pt. 2) o mesmo ~18s deu resultado ERRADO com
+  /// confiança. Perseguir um número fixo é perseguir um alvo que se move
+  /// por música/ruído/distância.
   ///
-  /// 1ª tentativa: testado 6s, depois 2s (14/ago/2026) — voltou pra 4s a
-  /// pedido do usuário, que é o valor original de antes de toda essa
-  /// rodada de ajuste e "aparentemente funcionava melhor". Continua dentro
-  /// da faixa validada como segura no teste controlado (4-8s = "nada", não
-  /// "errado").
-  static const _listenSegmentDurations = [Duration(seconds: 4), Duration(seconds: 18)];
+  /// A regra virou: **só aceita quando DUAS tentativas concordarem** no
+  /// mesmo resultado (ver _recordAndSearchSegment) — não a primeira
+  /// resposta não-vazia que aparecer. Um acerto de verdade tende a se
+  /// repetir conforme mais contexto é dado; um palpite errado isolado não
+  /// costuma se repetir igual numa tentativa independente diferente. Isso
+  /// se autoajusta por música sem precisar adivinhar limiar nenhum — casos
+  /// fáceis confirmam cedo (1ª e 2ª tentativas já concordam), casos
+  /// difíceis levam mais tentativas até duas baterem.
+  static const _listenSegmentDurations = [
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+    Duration(seconds: 12),
+    Duration(seconds: 16),
+    Duration(seconds: 20),
+  ];
 
   /// Cantar usa 60s — não é mais um teto "normal" pra parar de gravar, e
   /// sim um limite de segurança bem folgado: o pedido explícito é que a
@@ -233,6 +231,12 @@ class ListenController extends StateNotifier<ListenState> {
   // conseguir alcançá-lo de fora.
   Completer<void>? _stopEarlySignal;
 
+  // Ouvir: resultados não-vazios já vistos nessa sessão, na ordem em que
+  // apareceram — usado pra exigir 2 tentativas concordando antes de
+  // aceitar (ver _listenSegmentDurations e _recordAndSearchSegment).
+  // Cantar não usa isso (aceita a 1ª resposta, como sempre).
+  final List<Track> _listenCandidates = [];
+
   void setMode(ListenMode mode) {
     if (state.status == ListenStatus.recording) return;
     state = state.copyWith(mode: mode);
@@ -252,6 +256,7 @@ class ListenController extends StateNotifier<ListenState> {
   Future<void> startListening() async {
     if (_sessionActive) return;
     _sessionActive = true;
+    _listenCandidates.clear();
     state = state.copyWith(
       status: ListenStatus.recording,
       errorMessage: null,
@@ -333,11 +338,32 @@ class ListenController extends StateNotifier<ListenState> {
       if (!_sessionActive) return; // já achou em outro segmento ou foi cancelado
 
       if (track != null) {
-        _sessionActive = false;
-        await _amplitudeSub?.cancel();
-        await _recorder.cancelRecording(); // encerra o próximo trecho já em andamento
-        state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
-        return;
+        if (state.mode == ListenMode.hum) {
+          // Cantar: aceita na hora — o motor já combina melodia+letra no
+          // backend (ver ARCHITECTURE.md §4.1), não precisa de confirmação
+          // por repetição aqui. Só 1 tentativa nesse modo, então não tem
+          // gravação seguinte rodando em paralelo pra cancelar.
+          _sessionActive = false;
+          await _amplitudeSub?.cancel();
+          state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
+          return;
+        }
+
+        // Ouvir: só aceita se ESSE MESMO resultado já tinha aparecido
+        // antes, numa tentativa independente diferente (ver
+        // _listenSegmentDurations pro motivo — não existe duração
+        // "segura" universal; concordância entre tentativas é o sinal de
+        // confiança real, comprovado com dois testes reais em músicas
+        // diferentes, 14/ago/2026).
+        final alreadySeen = _listenCandidates.any((c) => c.id == track.id);
+        if (alreadySeen) {
+          _sessionActive = false;
+          await _amplitudeSub?.cancel();
+          await _recorder.cancelRecording(); // encerra o próximo trecho já em andamento
+          state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
+          return;
+        }
+        _listenCandidates.add(track);
       }
     } on IdentifyException catch (e) {
       if (!_sessionActive) return;
@@ -348,7 +374,9 @@ class ListenController extends StateNotifier<ListenState> {
       return;
     }
 
-    // Esse trecho não bateu. Se não há mais tentativas agendadas, desiste.
+    // Esse trecho não confirmou nada (vazio, ou um resultado novo ainda
+    // sem segunda tentativa concordando). Se não há mais tentativas
+    // agendadas, desiste.
     if (_sessionActive && !hasMoreAttempts) {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
@@ -485,6 +513,7 @@ class ListenController extends StateNotifier<ListenState> {
   /// enquanto ainda estava buscando).
   Future<void> cancel() async {
     _sessionActive = false;
+    _listenCandidates.clear();
     await _amplitudeSub?.cancel();
     await _recorder.cancelRecording();
     state = const ListenState();
