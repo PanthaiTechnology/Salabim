@@ -76,30 +76,46 @@ class ListenController extends StateNotifier<ListenState> {
   final AudioRecorderService _recorder;
   final ApiClient _api;
 
-  /// Duração de cada trecho gravado e enviado pro backend. Cantar usa 60s —
-  /// não é mais um teto "normal" pra parar de gravar, e sim um limite de
-  /// segurança bem folgado: o pedido explícito é que a gravação SÓ termine
-  /// pelo toque manual ("toque para finalizar e buscar") ou pelos 5s de
-  /// silêncio abaixo — quanto mais a pessoa canta, mais contexto melódico
-  /// o ACRCloud tem pra acertar, então não faz sentido cortar por tempo
-  /// enquanto ela ainda está cantando.
-  ///
-  /// Ouvir: teste com 7s (14/ago/2026, ver histórico do git) revertido —
-  /// dado real de app/services/recognition_metrics.py mostrou taxa de
-  /// acerto de só 11% com 7s (era o oposto do esperado). Voltou pra 4s.
-  Duration _segmentDurationFor(ListenMode mode) =>
-      mode == ListenMode.hum ? const Duration(seconds: 60) : const Duration(seconds: 4);
+  /// Ouvir: durações CRESCENTES por tentativa (não mais um número fixo
+  /// repetido) — decidido com base num teste controlado (14/ago/2026, ver
+  /// ARCHITECTURE.md §4.3): pegamos uma gravação real onde o Shazam
+  /// reconhecia e o Salabim não, e testamos o MESMO trecho na AudD com
+  /// durações crescentes a partir do início. Resultado: 4-8s não achava
+  /// nada; **10-14s achava uma música ERRADA com confiança** (o motor não
+  /// fica em silêncio quando tem contexto "no meio do caminho", ele
+  /// arrisca um palpite); só a partir de ~16s acertava de forma
+  /// consistente. Por isso a 1ª tentativa é curta (rápida pros casos
+  /// fáceis, perto da caixa — nesse patamar o teste mostrou "nada" em vez
+  /// de "errado", então é seguro tentar curto primeiro) e a 2ª pula
+  /// DIRETO pra 18s, evitando de propósito a faixa de 10-14s que se
+  /// mostrou perigosa (risco real de aceitar uma resposta errada com
+  /// confiança antes de dar tempo da tentativa longa, que é a correta,
+  /// rodar). "Parar cedo se achar rápido" já é automático: o
+  /// pipeline aceita o primeiro resultado não-vazio de qualquer tentativa,
+  /// então um acerto na 1ª tentativa (curta) encerra a sessão na hora, sem
+  /// esperar a 2ª.
+  static const _listenSegmentDurations = [Duration(seconds: 6), Duration(seconds: 18)];
+
+  /// Cantar usa 60s — não é mais um teto "normal" pra parar de gravar, e
+  /// sim um limite de segurança bem folgado: o pedido explícito é que a
+  /// gravação SÓ termine pelo toque manual ("toque para finalizar e
+  /// buscar") ou pelos 5s de silêncio abaixo — quanto mais a pessoa canta,
+  /// mais contexto melódico o ACRCloud tem pra acertar, então não faz
+  /// sentido cortar por tempo enquanto ela ainda está cantando.
+  Duration _segmentDurationFor(ListenMode mode, int attemptIndex) {
+    if (mode == ListenMode.hum) return const Duration(seconds: 60);
+    final i = attemptIndex.clamp(0, _listenSegmentDurations.length - 1);
+    return _listenSegmentDurations[i];
+  }
 
   /// Quantos trechos tenta no total antes de desistir. Cantar é 1 tentativa
   /// única: uma gravação contínua tem muito mais contexto melódico pro
   /// ACRCloud reconhecer do que várias fatiadas — testado na prática,
   /// precisão caiu de verdade com 3 tentativas menores. A detecção de
   /// silêncio (abaixo) já resolve "não fica esperando à toa" sem precisar
-  /// fatiar a gravação.
-  ///
-  /// Ouvir: voltou pra 5 (era 3 durante o teste de segmento de 7s acima,
-  /// revertido junto).
-  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : 5;
+  /// fatiar a gravação. Ouvir: uma tentativa por duração em
+  /// _listenSegmentDurations.
+  int _maxAttemptsFor(ListenMode mode) => mode == ListenMode.hum ? 1 : _listenSegmentDurations.length;
 
   // Detecção de silêncio — só no modo Cantar: se a pessoa já começou a
   // cantar e depois passa a maior parte dos últimos 5s calada, entende que
@@ -276,8 +292,11 @@ class ListenController extends StateNotifier<ListenState> {
     );
 
     final mode = state.mode;
+    // state.attempt aqui ainda é o número de tentativas JÁ CONCLUÍDAS antes
+    // dessa gravação começar (0 na 1ª chamada) — é o índice certo pra
+    // escolher a duração crescente dessa tentativa (ver _segmentDurationFor).
     await Future.any([
-      Future.delayed(_segmentDurationFor(mode)),
+      Future.delayed(_segmentDurationFor(mode, state.attempt)),
       stopEarly.future,
     ]);
     _stopEarlySignal = null;
