@@ -61,6 +61,32 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
   ];
   List<String> _hintPhrasesFor(ListenMode mode) => mode == ListenMode.hum ? _cantarRecordingHints : _ouvirRecordingHints;
 
+  /// Estilo do texto de status fora do loop de dicas (que já tem seu
+  /// próprio estilo fixo em 22px). Idle mantém o tamanho original (15px);
+  /// "Processando..." e "não encontrado" usam a mesma fonte/opacidade do
+  /// loop de dicas, mas no MESMO tamanho maior (22px) — pedido explícito
+  /// do usuário, pros dois modos. Erro fica com o estilo de sempre (nunca
+  /// foi pedido pra mudar).
+  TextStyle _statusTextStyleFor(ListenStatus status) {
+    switch (status) {
+      case ListenStatus.idle:
+        return GoogleFonts.baloo2(
+          color: AppColors.textPrimary.withValues(alpha: _hintMaxOpacity),
+          fontSize: 15,
+          fontWeight: FontWeight.w700,
+        );
+      case ListenStatus.recording: // só chega aqui durante "Processando..." — isHintCycleActive cobre o resto
+      case ListenStatus.notFound:
+        return GoogleFonts.baloo2(
+          color: AppColors.textPrimary.withValues(alpha: _hintMaxOpacity),
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+        );
+      case ListenStatus.error:
+        return const TextStyle(color: AppColors.textSecondary, fontSize: 15);
+    }
+  }
+
   // Tempo legível parado (opacidade máxima) antes de começar a sumir.
   static const _hintHoldDuration = Duration(milliseconds: 2200);
   // Duração do fade — usada tanto pro "sumir" quanto pro "aparecer"
@@ -385,12 +411,11 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     // antes.
     final isHintCycleActive = isRecording && !state.isProcessing;
     // Mesma fonte (Baloo 2) e mesma opacidade (_hintMaxOpacity) do loop de
-    // dicas, a pedido do usuário, pras frases de idle ("Ouça a música e...
-    // Salabim !!" / "Cante ou toque a música e... Salabim !!") e
-    // "Processando..." — mantendo o TAMANHO original de cada uma (não o
-    // 22px usado no loop). "Não encontrado" e erro continuam com o estilo
-    // de sempre (não foram pedidos).
-    final useBalooStatusStyle = state.status == ListenStatus.idle || (isRecording && state.isProcessing);
+    // dicas em quase todos os estados — idle mantém o tamanho original
+    // (15px); "Processando..." e "não encontrado" usam o mesmo 22px do
+    // loop de dicas (pedido do usuário). Erro continua com o estilo de
+    // sempre (não foi pedido).
+    final statusTextStyle = _statusTextStyleFor(state.status);
 
     // Toca em qualquer lugar da tela pra encerrar a gravação (Cantar) ou
     // cancelar (Ouvir) — mesma lógica que já existia no botão, só que agora
@@ -521,13 +546,7 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
                 : Text(
                     statusLabel,
                     textAlign: TextAlign.center,
-                    style: useBalooStatusStyle
-                        ? GoogleFonts.baloo2(
-                            color: AppColors.textPrimary.withValues(alpha: _hintMaxOpacity),
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                          )
-                        : const TextStyle(color: AppColors.textSecondary, fontSize: 15),
+                    style: statusTextStyle,
                   ),
           ),
           // TEMPORÁRIO — diagnóstico do motivo/tempo em que a gravação do
