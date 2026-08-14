@@ -45,69 +45,95 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     duration: const Duration(seconds: 2),
   )..repeat(reverse: true);
 
-  // Loop de simulação a 60fps, ativo só enquanto grava: suaviza as leituras
-  // de amplitude (que chegam ~10x/s do AudioRecorderService) em algo fluido,
-  // e deriva um "wobble" orgânico a partir de quanto o volume anda variando.
+  // Loop de simulação a 60fps, ativo só enquanto grava de verdade (não
+  // durante "Processando..."): suaviza as leituras de amplitude (que chegam
+  // ~10x/s do AudioRecorderService) em algo fluido, e deriva um "wobble"
+  // orgânico a partir de quanto o volume anda variando.
   late final Ticker _reactiveTicker = createTicker(_onTick);
   final List<double> _recentSamples = [];
   double _smoothedVolume = 0.0;
   double _wobblePhase = 0.0;
   double _wobble = 0.0;
 
-  // Animação de "Processando...": o ícone do mago some e reaparece em loop
-  // (fade + leve encolhida, nunca some por completo — sempre mantém uma
-  // presença mínima) enquanto um arco gira ao redor dele, sincronizado no
-  // mesmo controller — uma rotação completa por respiração. Um único ciclo
-  // (0 -> 1) começa E termina com o ícone 100% visível (ver
-  // _processingOpacity/_processingScale abaixo), então o loop nunca "pisca"
-  // ou dá salto perceptível na costura entre uma repetição e a próxima.
-  late final AnimationController _processingController = AnimationController(
+  // Animação de "ouvindo" (gravando de verdade, nos dois modos): o ícone do
+  // mago some e reaparece em loop (fade + leve encolhida, nunca some por
+  // completo — sempre mantém uma presença mínima) enquanto um arco gira ao
+  // redor dele, sincronizado no mesmo controller — uma rotação completa por
+  // respiração. Um único ciclo (0 -> 1) começa E termina com o ícone 100%
+  // visível (ver _listeningOpacity/_listeningScale abaixo), então o loop
+  // nunca "pisca" ou dá salto perceptível na costura entre uma repetição e
+  // a próxima. Reforça a identidade visual bem no momento em que o app está
+  // de fato "ouvindo/cantando" o usuário.
+  late final AnimationController _listeningController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1700),
   );
 
-  static final Animatable<double> _processingOpacity = TweenSequence<double>([
+  static final Animatable<double> _listeningOpacity = TweenSequence<double>([
     TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.22).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
     TweenSequenceItem(tween: Tween(begin: 0.22, end: 1.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
   ]);
 
-  static final Animatable<double> _processingScale = TweenSequence<double>([
+  static final Animatable<double> _listeningScale = TweenSequence<double>([
     TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.8).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
     TweenSequenceItem(tween: Tween(begin: 0.8, end: 1.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
   ]);
 
+  // Animação de "Processando...": o botão volta a ficar visualmente
+  // "parado" (mesmo círculo com a pulsada leve de sempre, _idlePulse — nada
+  // de anéis reativos), e o ícone do mago "carrega" — os 3 traços de som
+  // saindo da boca acendem um de cada vez (traço 1 -> 1+2 -> 1+2+3), ficam
+  // completos um instante, e apagam juntos pra recomeçar. Por cima disso,
+  // o mago inteiro (corpo + traços) ganha uma respiração de opacidade bem
+  // sutil, nunca sumindo de verdade — só o suficiente pro olho perceber.
+  late final AnimationController _loadingController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2000),
+  );
+
   @override
   void initState() {
     super.initState();
-    if (widget.isRecording) _reactiveTicker.start();
-    if (widget.isProcessing) _processingController.repeat();
+    if (_isActivelyListening) _reactiveTicker.start();
+    if (widget.isProcessing) _loadingController.repeat();
+    if (_isActivelyListening) _listeningController.repeat();
   }
+
+  // "Ouvindo de verdade" — grava e ainda não entrou em "Processando...".
+  // OBS: `isRecording` continua true durante o Processando também (é assim
+  // que o estado é modelado no controller), então precisa desse `&&` extra
+  // sempre que a distinção importar aqui no botão.
+  bool get _isActivelyListening => widget.isRecording && !widget.isProcessing;
 
   @override
   void didUpdateWidget(covariant PulseButton oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (widget.isRecording && !oldWidget.isRecording) {
+    final wasActivelyListening = oldWidget.isRecording && !oldWidget.isProcessing;
+    if (_isActivelyListening && !wasActivelyListening) {
       _recentSamples.clear();
       _reactiveTicker.start();
-    } else if (!widget.isRecording && oldWidget.isRecording) {
+      _listeningController.repeat();
+    } else if (!_isActivelyListening && wasActivelyListening) {
       _reactiveTicker.stop();
+      _listeningController.stop();
+      _listeningController.value = 0;
       setState(() {
         _smoothedVolume = 0.0;
         _wobble = 0.0;
       });
     }
 
-    if (widget.isRecording && widget.amplitude != oldWidget.amplitude) {
+    if (_isActivelyListening && widget.amplitude != oldWidget.amplitude) {
       _recentSamples.add(widget.amplitude);
       if (_recentSamples.length > 8) _recentSamples.removeAt(0);
     }
 
     if (widget.isProcessing && !oldWidget.isProcessing) {
-      _processingController.repeat();
+      _loadingController.repeat();
     } else if (!widget.isProcessing && oldWidget.isProcessing) {
-      _processingController.stop();
-      _processingController.value = 0;
+      _loadingController.stop();
+      _loadingController.value = 0;
     }
   }
 
@@ -138,7 +164,8 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     _idlePulse.dispose();
     _reactiveTicker.stop();
     _reactiveTicker.dispose();
-    _processingController.dispose();
+    _listeningController.dispose();
+    _loadingController.dispose();
     super.dispose();
   }
 
@@ -146,10 +173,13 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     final gradient = widget.mode == ListenMode.listen ? AppColors.listenGradient : AppColors.humGradient;
     final glowColor = widget.mode == ListenMode.listen ? AppColors.primary : AppColors.secondary;
+    final activelyListening = _isActivelyListening;
 
     // Escala orgânica combinando volume suavizado + tremor de variação —
     // aplicada tanto no círculo central quanto nos anéis ao redor, cada um
-    // com um ganho diferente pra dar sensação de profundidade/camadas.
+    // com um ganho diferente pra dar sensação de profundidade/camadas. Só
+    // entra em cena enquanto "ouvindo de verdade" — durante "Processando",
+    // o botão volta a ficar com a aparência parada de sempre.
     final coreScale = 1.0 + _smoothedVolume * 0.22 + _wobble * 0.05;
     final ringScale = 1.0 + _smoothedVolume * 0.42 + _wobble * 0.08;
     final echoRingScale = 1.0 + _smoothedVolume * 0.62 + _wobble * 0.12;
@@ -170,7 +200,7 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
         child: Stack(
           alignment: Alignment.center,
           children: [
-            if (widget.isRecording) ...[
+            if (activelyListening) ...[
               // Anel "eco": o mais externo e mais transparente, reage mais forte
               // que os demais — reforça a sensação de onda se propagando.
               Opacity(
@@ -199,6 +229,9 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                 ),
               ),
             ] else
+              // Usado tanto parado (idle) quanto "Processando..." — os dois
+              // têm a mesma aparência de fora (só a pulsada leve de sempre),
+              // a diferença fica por conta do ícone central.
               AnimatedBuilder(
                 animation: _idlePulse,
                 builder: (context, _) {
@@ -224,14 +257,14 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                 },
               ),
             Transform.scale(
-              scale: widget.isRecording ? coreScale : 1.0,
+              scale: activelyListening ? coreScale : 1.0,
               child: Container(
                 width: 180,
                 height: 180,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: gradient,
-                  boxShadow: widget.isRecording
+                  boxShadow: activelyListening
                       ? [
                           BoxShadow(
                             color: glowColor.withValues(alpha: 0.3 + intensity * 0.3),
@@ -242,15 +275,23 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                       : null,
                 ),
                 child: Center(
-                  child: widget.isProcessing
-                      ? _ProcessingMark(controller: _processingController)
-                      : widget.isRecording
-                          ? const Icon(Icons.stop_rounded, color: Colors.white, size: 64)
-                          // Ícone parado: o próprio mago da identidade visual, só o
-                          // desenho branco (sem o fundo circular colorido original —
-                          // ver assets/icons/salabim_mark_white.png) por cima do
-                          // preenchimento em degradê do botão, que passa a fazer as
-                          // vezes do "círculo" do ícone original.
+                  child: activelyListening
+                      // Ouvindo de verdade (os dois modos): o mago
+                      // "respirando" com o arco girando ao redor — reforça a
+                      // identidade visual bem no momento em que o app está
+                      // de fato captando o usuário.
+                      ? _ListeningMark(controller: _listeningController)
+                      : widget.isProcessing
+                          // Processando: botão "parado" (mesmo círculo de
+                          // sempre) com o mago "carregando" — os traços de
+                          // som acendendo um a um.
+                          ? _LoadingMark(controller: _loadingController)
+                          // Ícone parado: o próprio mago da identidade visual,
+                          // só o desenho branco (sem o fundo circular colorido
+                          // original — ver assets/icons/salabim_mark_white.png)
+                          // por cima do preenchimento em degradê do botão, que
+                          // passa a fazer as vezes do "círculo" do ícone
+                          // original.
                           : Image.asset('assets/icons/salabim_mark_white.png', width: 108, fit: BoxFit.contain),
                 ),
               ),
@@ -262,12 +303,13 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
   }
 }
 
-/// Mago "respirando" enquanto processa: some (nunca por completo) e volta a
-/// aparecer, com um arco girando ao redor sincronizado na mesma volta —
-/// termina cada ciclo com o ícone 100% visível de novo, então o loop nunca
-/// dá um salto perceptível na costura entre uma repetição e a próxima.
-class _ProcessingMark extends StatelessWidget {
-  const _ProcessingMark({required this.controller});
+/// Mago "respirando" enquanto ouve de verdade (gravando, nos dois modos):
+/// some (nunca por completo) e volta a aparecer, com um arco girando ao
+/// redor sincronizado na mesma volta — termina cada ciclo com o ícone 100%
+/// visível de novo, então o loop nunca dá um salto perceptível na costura
+/// entre uma repetição e a próxima.
+class _ListeningMark extends StatelessWidget {
+  const _ListeningMark({required this.controller});
 
   final AnimationController controller;
 
@@ -276,8 +318,8 @@ class _ProcessingMark extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final opacity = _PulseButtonState._processingOpacity.evaluate(controller);
-        final scale = _PulseButtonState._processingScale.evaluate(controller);
+        final opacity = _PulseButtonState._listeningOpacity.evaluate(controller);
+        final scale = _PulseButtonState._listeningScale.evaluate(controller);
         // O arco fica mais aceso exatamente quando o mago está mais apagado
         // — como se a "energia" migrasse de um pro outro — e gira uma volta
         // inteira por respiração.
@@ -302,6 +344,72 @@ class _ProcessingMark extends StatelessWidget {
                   child: Image.asset('assets/icons/salabim_mark_white.png', width: 92, fit: BoxFit.contain),
                 ),
               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Mago "carregando" enquanto processa: os 3 traços de som saindo da boca
+/// (ver assets/icons/salabim_mark_wave{1,2,3}.png, do menor/mais perto ao
+/// maior/mais longe) acendem em sequência — traço 1, depois 1+2, depois
+/// 1+2+3 — ficam completos por um instante, e apagam juntos antes do loop
+/// recomeçar. Por cima disso, o mago inteiro (corpo + traços, sempre que
+/// visível) ganha uma respiração de opacidade sutil e contínua, nunca
+/// sumindo de verdade — só o bastante pro olho notar.
+class _LoadingMark extends StatelessWidget {
+  const _LoadingMark({required this.controller});
+
+  final AnimationController controller;
+
+  static const _mark = 'assets/icons/salabim_mark_body.png';
+  static const _wave1 = 'assets/icons/salabim_mark_wave1.png';
+  static const _wave2 = 'assets/icons/salabim_mark_wave2.png';
+  static const _wave3 = 'assets/icons/salabim_mark_wave3.png';
+
+  // Janela [fadeInStart, fadeInEnd] sobe 0->1; fica em 1 até fadeOutStart;
+  // desce 1->0 até fadeOutEnd. As três janelas de entrada são sequenciais
+  // (um traço de cada vez), mas os três saem juntos no fim do ciclo.
+  static double _windowOpacity(double t, double fadeInStart, double fadeInEnd, double fadeOutStart, double fadeOutEnd) {
+    if (t < fadeInStart) return 0.0;
+    if (t < fadeInEnd) return (t - fadeInStart) / (fadeInEnd - fadeInStart);
+    if (t < fadeOutStart) return 1.0;
+    if (t < fadeOutEnd) return 1.0 - (t - fadeOutStart) / (fadeOutEnd - fadeOutStart);
+    return 0.0;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final t = controller.value;
+        // Respiração de opacidade contínua do mago inteiro — uma oscilação
+        // suave por ciclo, nunca chega perto de sumir (fica entre 0.78 e
+        // 1.0).
+        final breathe = 1.0 - (0.5 - 0.5 * math.cos(t * 2 * math.pi)) * 0.22;
+
+        final wave1 = _windowOpacity(t, 0.00, 0.20, 0.80, 1.00);
+        final wave2 = _windowOpacity(t, 0.20, 0.40, 0.80, 1.00);
+        final wave3 = _windowOpacity(t, 0.40, 0.60, 0.80, 1.00);
+
+        Widget layer(String asset, double opacity) => Opacity(
+              opacity: (opacity * breathe).clamp(0.0, 1.0),
+              child: Image.asset(asset, width: 108, fit: BoxFit.contain),
+            );
+
+        return SizedBox(
+          width: 108,
+          height: 108,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              layer(_mark, 1.0),
+              layer(_wave1, wave1),
+              layer(_wave2, wave2),
+              layer(_wave3, wave3),
             ],
           ),
         );
