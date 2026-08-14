@@ -291,6 +291,10 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
             if result:
                 metric["match_confidence"] = 1.0
         if not result:
+            # TEMPORÁRIO — diagnóstico do modo Ouvir vs Shazam (ver
+            # ARCHITECTURE.md §4.3 e Settings.debug_save_failed_listen_audio).
+            if get_settings().debug_save_failed_listen_audio:
+                await audio_utils.save_debug_audio(audio_bytes, normalized_bytes)
             return None
         track = Track(
             id=_stable_track_id(result.isrc, result.title, result.artist),

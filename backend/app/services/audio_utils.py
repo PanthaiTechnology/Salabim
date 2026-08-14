@@ -10,11 +10,15 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import time
+from pathlib import Path
 
 from pydub import AudioSegment
 from pydub.effects import normalize as _peak_normalize
 
 logger = logging.getLogger(__name__)
+
+_DEBUG_AUDIO_DIR = Path("/tmp/salabim_debug_audio")
 
 
 def _normalize_gain_sync(audio_bytes: bytes, input_format: str) -> bytes:
@@ -52,3 +56,23 @@ async def normalize_gain(audio_bytes: bytes, *, input_format: str = "m4a") -> by
     except Exception:
         logger.warning("Falha ao normalizar ganho do áudio — seguindo com o arquivo original.", exc_info=True)
         return audio_bytes
+
+
+def _save_debug_audio_sync(raw_bytes: bytes, normalized_bytes: bytes) -> None:
+    _DEBUG_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    (_DEBUG_AUDIO_DIR / f"{stamp}_raw.m4a").write_bytes(raw_bytes)
+    (_DEBUG_AUDIO_DIR / f"{stamp}_normalized.wav").write_bytes(normalized_bytes)
+    logger.info("Áudio de diagnóstico salvo em %s (%s)", _DEBUG_AUDIO_DIR, stamp)
+
+
+async def save_debug_audio(raw_bytes: bytes, normalized_bytes: bytes) -> None:
+    """TEMPORÁRIO — ver Settings.debug_save_failed_listen_audio em config.py.
+    Salva o áudio bruto e o normalizado de uma tentativa do Ouvir que não
+    encontrou nada, só dentro do container (nunca em volume persistente),
+    pra comparar depois contra o mesmo trecho testado direto no provedor.
+    Falha ao salvar nunca deve derrubar a busca real — é só diagnóstico."""
+    try:
+        await asyncio.to_thread(_save_debug_audio_sync, raw_bytes, normalized_bytes)
+    except Exception:
+        logger.warning("Falha ao salvar áudio de diagnóstico.", exc_info=True)

@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     # = desabilitado; nunca deve apontar pra nada em produção de verdade.
     apk_downloads_dir: str = ""
 
+    # TEMPORÁRIO (14/ago/2026) — diagnóstico do modo Ouvir vs Shazam (ver
+    # ARCHITECTURE.md §4.3). Quando ligado, salva em disco (só dentro do
+    # container, nunca em volume persistente) o áudio bruto E o normalizado
+    # de toda tentativa do Ouvir que NÃO encontrar nada — pra comparar
+    # depois, byte a byte, contra o mesmo trecho testado direto na AudD.
+    # Desligar (ou nunca ligar em produção de verdade) depois de terminar o
+    # diagnóstico — é só pra essa investigação pontual.
+    debug_save_failed_listen_audio: bool = False
+
     @property
     def cors_origins(self) -> list[str]:
         if self.allowed_origins == "*":
