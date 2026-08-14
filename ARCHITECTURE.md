@@ -142,13 +142,41 @@ sem depender de licenciar catálogo nenhum.
   volume existir, a Fase 2 não exige reconstruir nada, só adicionar um script de
   treino + um passo de inferência no `recognition_service.py`.
 
-### 4.3 Modo "Ouvir" — investigação de latência/precisão vs. Shazam (14/ago/2026)
+### 4.3 Modo "Ouvir" — causa raiz do "precisa chegar perto" vs. Shazam (14/ago/2026, RESOLVIDO)
 
 Usuário relatou, comparando lado a lado com o Shazam no mesmo lugar/volume: o
 Ouvir demora mais, às vezes erra a música, e só reconhece com o celular bem
 perto da caixa de som — o Shazam reconhece de mais longe, mais rápido.
-Registrando aqui o que já foi investigado/testado pra não perder o contexto
-se o tema voltar.
+Registrando aqui a investigação completa, a causa raiz confirmada e a
+correção aplicada.
+
+**Causa raiz confirmada por teste controlado:** o usuário gravou (com o
+gravador nativo do celular, fora do Salabim) um trecho de 21s exatamente no
+lugar/distância onde o Salabim falhava sempre e o Shazam acertava. Testamos
+esse MESMO arquivo direto na API da AudD, recortado em durações crescentes
+a partir do início:
+
+| Duração testada | Resultado |
+|---|---|
+| 4-8s (qualquer recorte) | Nada encontrado |
+| **10-14s** | **Encontra — mas ERRADO** (3 músicas diferentes testadas, nenhuma correta) |
+| 16-21s | Encontra certo, de forma consistente |
+
+Ou seja: a AudD **não fica em silêncio** quando recebe áudio insuficiente —
+a partir de ~10s ela já arrisca um palpite, e só fica confiável de verdade
+com ~16s+. O Ouvir mandava só 4s por tentativa. Isso explica os dois
+sintomas relatados ao mesmo tempo (não encontra E às vezes erra) com uma
+única causa, e descarta de vez as hipóteses de compressão/captura/pipeline
+(o arquivo de teste tinha o MESMO perfil de codificação — AAC-LC 44.1kHz
+mono — que o app já usa).
+
+**Correção aplicada:** `ListenController._segmentDurationFor` (mobile) agora
+usa durações crescentes por tentativa em vez de um número fixo repetido —
+6s na 1ª tentativa (rápido pros casos fáceis; nesse patamar o teste mostrou
+"nada" em vez de "errado", seguro tentar curto primeiro), 18s na 2ª,
+pulando de propósito a faixa perigosa de 10-14s. Continua parando cedo se
+achar rápido (o pipeline já aceita o primeiro resultado não vazio de
+qualquer tentativa).
 
 **Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
 o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
@@ -194,9 +222,16 @@ ressalvas que adiaram a decisão de implementar:
    que a AudD. Investir na ponte nativa antes de saber se o motor do
    ACRCloud é preciso o suficiente isoladamente seria otimizar a coisa errada.
 
-**Próximos passos, nessa ordem, se o tema voltar:**
-1. Deixar a AudD (configuração atual) acumular alguns dias de uso real na
-   métrica — ter uma linha de base de verdade antes de qualquer teste novo.
+**Status:** correção das durações crescentes aplicada e em produção
+(14/ago/2026). Diagnóstico temporário (`Settings.debug_save_failed_listen_audio`,
+salvava áudio de tentativas sem resultado pra comparação) já desligado —
+cumpriu o papel.
+
+**Se o tema voltar (sintoma persistir mesmo com durações crescentes, ou
+quiser ir além):**
+1. Checar a métrica real (`GET /v1/debug/identify-stats?mode=listen`) depois
+   de alguns dias de uso — confirmar com número se 6s/18s resolveu de
+   verdade, não só nesse teste pontual.
 2. Se quiser testar o ACRCloud de forma justa: precisa de um projeto
    **separado** (não combinado com o de Humming do Cantar) configurado só
    com o engine "Audio Fingerprinting" — a conta trial atual não permite
@@ -204,7 +239,9 @@ ressalvas que adiaram a decisão de implementar:
    pago.
 3. Só depois de confirmar que o motor do ACRCloud é preciso o suficiente
    isoladamente, vale considerar o investimento na ponte nativa do SDK
-   on-device (item anterior) pra também ganhar velocidade.
+   on-device (item anterior) pra também ganhar velocidade — nesse ponto já
+   resolveria precisão (durações maiores) e velocidade (fingerprint local)
+   juntos.
 
 ## 5. Fluxo de busca por texto (descrição / letra)
 
