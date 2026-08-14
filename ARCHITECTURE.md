@@ -198,6 +198,29 @@ normalização queria resolver. **Normalização desligada** (código mantido em
 `audio_utils.normalize_gain`, só não é mais chamada) — o Ouvir volta a
 mandar o áudio original pra AudD, só com as durações maiores.
 
+**Tentativa de stream contínuo — implementada e REVERTIDA (14/ago/2026):**
+pra checar em mais pontos (4s, 8s, 18s) sem sofrer o problema de "colar
+gravações separadas" (ver teste abaixo), reescrevemos a captura do Ouvir
+pra usar `AudioRecorder.startStream` (PCM bruto contínuo, nunca
+para/reinicia o microfone) com um WAV montado na hora a cada checkpoint —
+commit `2d77608`. O teste QUE VALIDOU a ideia foi feito só com ffmpeg/pydub
+no computador (simulando blocos colados vs. contínuos a partir de um
+arquivo já gravado) — nunca testamos a implementação real do
+`AudioRecorder.startStream` do pacote `record` num aparelho de verdade
+antes de shippar. Resultado em uso real: ficava muito tempo preso em
+"ouvindo" e "processando" demorava muito mais que antes — pior experiência
+geral, mesmo a AudD respondendo rápido (~700ms, confirmado na métrica, ou
+seja o atraso NÃO era do backend). Causa exata não diagnosticada (não tinha
+instrumentação client-side pra isso) — **revertido** (`git revert 2d77608`,
+commit `6a5ca5c`) de volta pra duas gravações separadas (4s, depois 18s do
+zero se a primeira falhar), que é o estado validado que funciona.
+
+**Lição pra próxima vez que mexer nisso:** validar mudança de CAPTURA
+(diferente de mudança de configuração/parâmetro) sempre no aparelho real
+antes de considerar "provado" — um teste offline com ffmpeg/pydub valida a
+IDEIA (ex: "colar blocos separados degrada"), mas não garante que a
+IMPLEMENTAÇÃO real no pacote `record`/Android se comporta como esperado.
+
 **Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
 o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
 só uma consulta compacta (poucos KB) — não o áudio gravado. O Salabim (como
