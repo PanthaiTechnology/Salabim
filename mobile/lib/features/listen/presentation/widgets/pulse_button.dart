@@ -299,48 +299,62 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
               ),
             Transform.scale(
               scale: activelyListening ? coreScale : 1.0,
-              child: Container(
-                width: 180,
-                height: 180,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: gradient,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 180,
+                    height: 180,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: gradient,
+                      boxShadow: activelyListening
+                          ? [
+                              BoxShadow(
+                                color: glowColor.withValues(alpha: 0.3 + intensity * 0.3),
+                                blurRadius: 30 + intensity * 30,
+                                spreadRadius: 2 + intensity * 8,
+                              ),
+                            ]
+                          : null,
+                    ),
+                    child: Center(
+                      child: activelyListening
+                          // Ouvindo de verdade (os dois modos): o mago
+                          // "respirando" com o arco girando ao redor — reforça a
+                          // identidade visual bem no momento em que o app está
+                          // de fato captando o usuário.
+                          ? _ListeningMark(controller: _listeningController)
+                          : widget.isProcessing
+                              // Processando: botão "parado" (mesmo círculo de
+                              // sempre) com o mago "carregando" — os traços de
+                              // som acendendo um a um.
+                              ? _LoadingMark(controller: _loadingController)
+                              // Ícone parado: o próprio mago da identidade visual,
+                              // só o desenho branco (sem o fundo circular colorido
+                              // original — ver assets/icons/salabim_mark_white.png)
+                              // por cima do preenchimento em degradê do botão, que
+                              // passa a fazer as vezes do "círculo" do ícone
+                              // original.
+                              : Image.asset('assets/icons/salabim_mark_white.png', width: 108, fit: BoxFit.contain),
+                    ),
+                  ),
                   // Stroke interno, bem fininho e claro — um toque sutil que
                   // "combina" com os anéis finos de fora (mesma cor branca,
-                  // mesma linguagem visual), só que por dentro do círculo
-                  // principal, presente nos dois modos e em todos os estados
-                  // do botão (parado, ouvindo, processando).
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.18), width: 1),
-                  boxShadow: activelyListening
-                      ? [
-                          BoxShadow(
-                            color: glowColor.withValues(alpha: 0.3 + intensity * 0.3),
-                            blurRadius: 30 + intensity * 30,
-                            spreadRadius: 2 + intensity * 8,
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Center(
-                  child: activelyListening
-                      // Ouvindo de verdade (os dois modos): o mago
-                      // "respirando" com o arco girando ao redor — reforça a
-                      // identidade visual bem no momento em que o app está
-                      // de fato captando o usuário.
-                      ? _ListeningMark(controller: _listeningController)
-                      : widget.isProcessing
-                          // Processando: botão "parado" (mesmo círculo de
-                          // sempre) com o mago "carregando" — os traços de
-                          // som acendendo um a um.
-                          ? _LoadingMark(controller: _loadingController)
-                          // Ícone parado: o próprio mago da identidade visual,
-                          // só o desenho branco (sem o fundo circular colorido
-                          // original — ver assets/icons/salabim_mark_white.png)
-                          // por cima do preenchimento em degradê do botão, que
-                          // passa a fazer as vezes do "círculo" do ícone
-                          // original.
-                          : Image.asset('assets/icons/salabim_mark_white.png', width: 108, fit: BoxFit.contain),
-                ),
+                  // mesma linguagem visual), afastado da borda do círculo
+                  // (não colado nela), presente nos dois modos e em todos os
+                  // estados do botão (parado, ouvindo, processando).
+                  IgnorePointer(
+                    child: Container(
+                      width: 170,
+                      height: 170,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
