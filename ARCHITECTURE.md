@@ -170,13 +170,33 @@ sintomas relatados ao mesmo tempo (não encontra E às vezes erra) com uma
 (o arquivo de teste tinha o MESMO perfil de codificação — AAC-LC 44.1kHz
 mono — que o app já usa).
 
-**Correção aplicada:** `ListenController._segmentDurationFor` (mobile) agora
-usa durações crescentes por tentativa em vez de um número fixo repetido —
-6s na 1ª tentativa (rápido pros casos fáceis; nesse patamar o teste mostrou
-"nada" em vez de "errado", seguro tentar curto primeiro), 18s na 2ª,
-pulando de propósito a faixa perigosa de 10-14s. Continua parando cedo se
-achar rápido (o pipeline já aceita o primeiro resultado não vazio de
-qualquer tentativa).
+**Correção aplicada (parte 1):** `ListenController._segmentDurationFor` (mobile)
+agora usa durações crescentes por tentativa em vez de um número fixo
+repetido — 6s na 1ª tentativa (rápido pros casos fáceis; nesse patamar o
+teste mostrou "nada" em vez de "errado", seguro tentar curto primeiro), 18s
+na 2ª, pulando de propósito a faixa perigosa de 10-14s. Continua parando
+cedo se achar rápido (o pipeline já aceita o primeiro resultado não vazio
+de qualquer tentativa).
+
+**Segunda causa encontrada — a normalização de ganho piorava justamente as
+durações maiores:** depois de ativar a correção acima, a métrica real
+(`GET /v1/debug/identify-stats`) mostrou taxa de acerto AINDA pior (6,2% em
+145 tentativas) — a correção de duração sozinha não bastou. Reaplicamos o
+mesmo teste controlado, dessa vez comparando os recortes de 12-18s **com**
+e **sem** `audio_utils.normalize_gain`:
+
+| Duração | Sem normalizar | Com normalizar |
+|---|---|---|
+| 16s | **Certo** (DeadWhite) | Errado (DJ big shot) |
+| 18s | **Certo** (DeadWhite) | Errado (Abbey8K) |
+
+A normalização (sobe o PICO até ~0dBFS) transformou dois resultados certos
+em errados. Hipótese confirmada: em gravações mais longas, normalizar por
+pico (em vez de RMS/loudness) tem mais chance de um ruído isolado dominar o
+cálculo e distorcer a proporção do áudio real — o oposto do que a
+normalização queria resolver. **Normalização desligada** (código mantido em
+`audio_utils.normalize_gain`, só não é mais chamada) — o Ouvir volta a
+mandar o áudio original pra AudD, só com as durações maiores.
 
 **Diagnóstico de arquitetura (por que a diferença existe, estruturalmente):**
 o Shazam calcula o fingerprint **no próprio aparelho** e manda pro servidor
@@ -194,7 +214,7 @@ das datas citadas):**
 
 | Mudança | Resultado | Situação |
 |---|---|---|
-| Normalizar o pico do áudio antes de enviar pro fingerprint (`audio_utils.normalize_gain`, sobe o volume captado até ~0dBFS) | Usuário reportou melhora | **Mantido, ativo em produção** |
+| Normalizar o pico do áudio antes de enviar pro fingerprint (`audio_utils.normalize_gain`, sobe o volume captado até ~0dBFS) | Usuário reportou melhora inicial, mas teste controlado depois mostrou que piorava justamente as durações maiores (16-18s) — ver detalhe abaixo | **Desligado** (código mantido, não chamado) |
 | Trocar o provedor do Ouvir de AudD pra ACRCloud fingerprint (`Settings.listen_recognition_provider`, infraestrutura pronta pra reativar) | Pior em distância, precisão E velocidade — mas teste "sujo": a conta trial só permite 1 projeto, então rodou no mesmo projeto/chave do Cantar com o motor **combinado** (Audio Fingerprinting + Cover Song), que processa os dois motores em toda chamada | Revertido (voltou pra `audd`). Não foi um teste justo — ver "próximos passos" abaixo |
 | `AndroidAudioSource.camcorder` no lugar da fonte padrão do microfone (evita AGC/cancelamento de ruído pensado pra chamada de voz, que trata música de fundo como "ruído" a suprimir) | Piorou no teste em aparelho real | Revertido (voltou pra `AndroidAudioSource.defaultSource`) |
 | Segmento de gravação de 4s → 7s (mais contexto por tentativa, menos tentativas) | Taxa de acerto caiu pra 11% (medido, não "achismo" — ver métrica abaixo) | Revertido (voltou pra 4s / 5 tentativas) |
