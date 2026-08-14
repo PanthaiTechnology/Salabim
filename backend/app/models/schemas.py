@@ -61,6 +61,15 @@ class HealthResponse(BaseModel):
     providers: dict[str, bool]
 
 
+class ListenSessionReport(BaseModel):
+    """Sessão do Ouvir de ponta a ponta, medida no cliente (mobile) — ver
+    recognition_metrics.record_listen_session para o motivo de existir."""
+
+    outcome: str = Field(..., description="found | not_found | cancelled | error")
+    attempts: int = Field(..., ge=0)
+    total_ms: int = Field(..., ge=0)
+
+
 class FeedbackRequest(BaseModel):
     """Feedback do usuário sobre um resultado: confirma se está certo, ou
     informa o nome real quando está errado. Vira uma correção persistente

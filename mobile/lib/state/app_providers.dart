@@ -243,6 +243,24 @@ class ListenController extends StateNotifier<ListenState> {
   // Cantar não usa isso (aceita a 1ª resposta, como sempre).
   final List<Track> _listenCandidates = [];
 
+  // Diagnóstico (14/ago/2026, ver ARCHITECTURE.md §4.3): quando uma sessão
+  // do Ouvir começa, marca a hora — usado pra logar tempo total + nº de
+  // tentativas assim que ela termina (achou/não achou/erro/cancelada), via
+  // _reportListenSession. Só o Ouvir usa isso (null = não é uma sessão do
+  // Ouvir em andamento, ou já foi reportada).
+  DateTime? _listenSessionStart;
+
+  /// Loga o desfecho de uma sessão do Ouvir (fogo-e-esquece, nunca deve
+  /// atrasar/atrapalhar a UI). Sem efeito se não havia sessão do Ouvir em
+  /// andamento (ex: chamado durante o Cantar) ou se já foi reportada.
+  void _reportListenSession(String outcome, int attempts) {
+    final start = _listenSessionStart;
+    if (start == null) return;
+    _listenSessionStart = null;
+    final totalMs = DateTime.now().difference(start).inMilliseconds;
+    unawaited(_api.reportListenSession(outcome: outcome, attempts: attempts, totalMs: totalMs));
+  }
+
   void setMode(ListenMode mode) {
     if (state.status == ListenStatus.recording) return;
     state = state.copyWith(mode: mode);
@@ -263,6 +281,7 @@ class ListenController extends StateNotifier<ListenState> {
     if (_sessionActive) return;
     _sessionActive = true;
     _listenCandidates.clear();
+    _listenSessionStart = state.mode == ListenMode.listen ? DateTime.now() : null;
     state = state.copyWith(
       status: ListenStatus.recording,
       errorMessage: null,
@@ -367,6 +386,7 @@ class ListenController extends StateNotifier<ListenState> {
           await _amplitudeSub?.cancel();
           await _recorder.cancelRecording(); // encerra o próximo trecho já em andamento
           state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
+          _reportListenSession('found', currentAttempt);
           return;
         }
         _listenCandidates.add(track);
@@ -377,6 +397,7 @@ class ListenController extends StateNotifier<ListenState> {
       await _amplitudeSub?.cancel();
       await _recorder.cancelRecording();
       state = state.copyWith(status: ListenStatus.error, errorMessage: e.message, isProcessing: false);
+      _reportListenSession('error', currentAttempt);
       return;
     }
 
@@ -387,6 +408,7 @@ class ListenController extends StateNotifier<ListenState> {
       _sessionActive = false;
       await _amplitudeSub?.cancel();
       state = state.copyWith(status: ListenStatus.notFound, isProcessing: false);
+      _reportListenSession('not_found', currentAttempt);
       // Volta sozinho pro estado padrão depois de 5s — a mensagem de "não
       // encontrado" já é auto-explicativa na hora, não precisa ficar presa
       // na tela até o usuário tocar de novo. Só reseta se ainda estiver
@@ -520,6 +542,7 @@ class ListenController extends StateNotifier<ListenState> {
   Future<void> cancel() async {
     _sessionActive = false;
     _listenCandidates.clear();
+    _reportListenSession('cancelled', state.attempt);
     await _amplitudeSub?.cancel();
     await _recorder.cancelRecording();
     state = const ListenState();

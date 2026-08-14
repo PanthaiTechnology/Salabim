@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections import Counter
 from contextlib import asynccontextmanager
 
 from app.core.cache import get_redis
@@ -27,6 +28,11 @@ logger = logging.getLogger("salabim.recognition")
 _METRICS_KEY = "salabim:metrics:identify"
 _METRICS_MAX_LEN = 2000  # generoso pro volume de teste manual, sem crescer sem limite
 _METRICS_TTL_SECONDS = 60 * 60 * 24 * 30  # 30 dias — não precisa sobreviver pra sempre
+
+# Sessão do Ouvir de ponta a ponta (client-side) — ver
+# record_listen_session abaixo pro motivo de existir separado do resto
+# desse arquivo.
+_SESSION_METRICS_KEY = "salabim:metrics:listen_session"
 
 
 async def record_identify_attempt(
@@ -105,5 +111,62 @@ async def recent_stats(*, mode: str | None = None, provider: str | None = None, 
             "p95": _percentile(0.95),
             "min": latencies[0],
             "max": latencies[-1],
+        },
+    }
+
+
+async def record_listen_session(*, outcome: str, attempts: int, total_ms: int) -> None:
+    """Sessão do Ouvir de ponta a ponta, medida no CLIENTE (mobile) — desde
+    o toque no botão até o resultado final (achou/não achou/erro/
+    cancelado). Complementa `record_identify_attempt` acima: aquele só
+    mede a chamada à AudD (tipicamente <1s); o tempo que o usuário
+    realmente sente é dominado pelo tempo de GRAVAÇÃO entre tentativas até
+    duas concordarem (ver ARCHITECTURE.md §4.3), que é inteiramente
+    client-side e nunca aparecia em nenhuma métrica antes. Existe pra
+    decidir com dado real (quantas tentativas cada busca real precisa até
+    confirmar, distribuição de tempo total) onde apertar o cronograma de
+    `_listenSegmentDurations` no app, em vez de ajustar às cegas de novo."""
+    event = {"ts": time.time(), "outcome": outcome, "attempts": attempts, "total_ms": total_ms}
+    logger.info("listen_session %s", json.dumps(event))
+    try:
+        r = get_redis()
+        await r.lpush(_SESSION_METRICS_KEY, json.dumps(event))
+        await r.ltrim(_SESSION_METRICS_KEY, 0, _METRICS_MAX_LEN - 1)
+        await r.expire(_SESSION_METRICS_KEY, _METRICS_TTL_SECONDS)
+    except Exception:
+        logger.warning("Falha ao gravar métrica de sessão do Ouvir no Redis.", exc_info=True)
+
+
+async def recent_listen_session_stats(*, outcome: str | None = None, limit: int = 500) -> dict:
+    """Agrega as sessões do Ouvir recentes: contagem por desfecho,
+    histograma de quantas tentativas cada uma levou, e tempo total
+    médio/p50/p95 — usado pelo endpoint de debug pra decidir onde apertar
+    o cronograma de tentativas sem precisar reconstruir teste manual toda
+    vez."""
+    r = get_redis()
+    raw_events = await r.lrange(_SESSION_METRICS_KEY, 0, limit - 1)
+    events = [json.loads(e) for e in raw_events]
+    if outcome:
+        events = [e for e in events if e.get("outcome") == outcome]
+
+    if not events:
+        return {"count": 0}
+
+    total_ms_list = sorted(e["total_ms"] for e in events)
+
+    def _percentile(p: float) -> int:
+        idx = min(len(total_ms_list) - 1, int(len(total_ms_list) * p))
+        return total_ms_list[idx]
+
+    return {
+        "count": len(events),
+        "by_outcome": dict(Counter(e.get("outcome") for e in events)),
+        "attempts_histogram": dict(sorted(Counter(e.get("attempts") for e in events).items())),
+        "total_ms": {
+            "avg": round(sum(total_ms_list) / len(total_ms_list)),
+            "p50": _percentile(0.50),
+            "p95": _percentile(0.95),
+            "min": total_ms_list[0],
+            "max": total_ms_list[-1],
         },
     }

@@ -128,4 +128,25 @@ class ApiClient {
       return [];
     }
   }
+
+  /// Loga o tempo total e nº de tentativas de UMA sessão do Ouvir de ponta
+  /// a ponta (medido no cliente) — diagnóstico pra afinar
+  /// `_listenSegmentDurations` (ver ARCHITECTURE.md §4.3) com dado real em
+  /// vez de achismo. Fogo-e-esquece: nunca deve atrapalhar a busca real,
+  /// falha silenciosa.
+  Future<void> reportListenSession({
+    required String outcome,
+    required int attempts,
+    required int totalMs,
+  }) async {
+    try {
+      await _dio.post('/v1/debug/listen-session', data: {
+        'outcome': outcome,
+        'attempts': attempts,
+        'total_ms': totalMs,
+      });
+    } on DioException {
+      // Diagnóstico, não crítico — nunca deve atrapalhar a busca real.
+    }
+  }
 }
