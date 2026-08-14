@@ -65,27 +65,16 @@ class ListenState {
   }
 }
 
-// TEMPORÁRIO — diagnóstico pra achar por que o modo Cantar às vezes encerra
-// a gravação sozinho bem antes do esperado, sem toque manual e sem silêncio
-// real (relatado em 13/ago/2026). ListenController escreve aqui o motivo e o
-// tempo decorrido assim que a gravação para; listen_screen.dart mostra esse
-// texto embaixo de "Processando...". Fora do ListenState/copyWith de
-// propósito — não queria arriscar mexer no padrão de merge que os outros
-// campos já usam só por causa de um campo temporário. Remover (aqui, no
-// controller e na tela) assim que acharmos a causa real.
-final debugStopReasonProvider = StateProvider<String?>((ref) => null);
-
 /// Controla o ciclo de escuta contínua: assim que o usuário toca uma vez,
 /// grava um trecho curto, já começa a gravar o próximo trecho, e em
 /// paralelo manda o trecho anterior pro backend. O resultado aparece assim
 /// que QUALQUER trecho bater — sem precisar tocar de novo pra parar. O
 /// usuário só interage de novo se quiser cancelar antes da hora.
 class ListenController extends StateNotifier<ListenState> {
-  ListenController(this._recorder, this._api, this._ref) : super(const ListenState());
+  ListenController(this._recorder, this._api) : super(const ListenState());
 
   final AudioRecorderService _recorder;
   final ApiClient _api;
-  final Ref _ref;
 
   /// Duração de cada trecho gravado e enviado pro backend. Ouvir continua
   /// 4s (segmentos curtos, várias tentativas). Cantar agora usa 60s — não é
@@ -206,16 +195,6 @@ class ListenController extends StateNotifier<ListenState> {
   // amostras mais antigas são descartadas a cada nova leitura.
   final List<MapEntry<DateTime, bool>> _recentAmplitudeSamples = [];
 
-  // TEMPORÁRIO — junto com debugStopReasonProvider acima, só pra
-  // diagnóstico (ver comentário lá). Usuário relatou tanto o auto-stop de
-  // 5s não disparando quanto disparando cedo demais (14/ago/2026) —
-  // acompanha a menor densidade de voz vista na janela, pra saber o quão
-  // perto (ou longe) chegou de disparar em cada teste.
-  DateTime? _segmentStartedAt;
-  double _lastAmplitude = 0;
-  double _minAmplitudeSeen = 1.0;
-  double _minVoiceFractionSeen = 1.0;
-
   StreamSubscription<double>? _amplitudeSub;
   bool _sessionActive = false;
 
@@ -265,10 +244,6 @@ class ListenController extends StateNotifier<ListenState> {
     _noiseFloorUpdatedAt = DateTime.now();
     _smoothedAmplitude = null;
     _voiceLevelEstimate = null;
-    _segmentStartedAt = DateTime.now(); // TEMPORÁRIO — só pro diagnóstico
-    _minAmplitudeSeen = 1.0; // TEMPORÁRIO
-    _minVoiceFractionSeen = 1.0; // TEMPORÁRIO
-    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
     // Sinalizador que completa cedo tanto pela detecção automática de
     // silêncio (5s calado depois de já ter cantado) quanto por um toque
     // manual do usuário em finishRecordingNow() — corrida contra o timer
@@ -281,9 +256,6 @@ class ListenController extends StateNotifier<ListenState> {
       (amp) {
         if (!_sessionActive) return;
         state = state.copyWith(amplitude: amp);
-        // TEMPORÁRIO — só pro diagnóstico
-        _lastAmplitude = amp;
-        if (amp < _minAmplitudeSeen) _minAmplitudeSeen = amp;
         if (state.mode == ListenMode.hum) {
           _checkForSilence(amp, stopEarly);
         }
@@ -302,19 +274,6 @@ class ListenController extends StateNotifier<ListenState> {
       Future.delayed(_segmentDurationFor(mode)),
       stopEarly.future,
     ]);
-    // TEMPORÁRIO — se chegou aqui e o sinalizador NÃO foi completado, foi o
-    // timer de duração máxima que resolveu a corrida (não silêncio, nem
-    // toque manual — esses dois já escrevem o motivo deles antes de
-    // completar o sinalizador). Só interessa no Cantar; no Ouvir o
-    // sinalizador nunca é usado, sempre "vence" o timer de 4s mesmo.
-    if (mode == ListenMode.hum && !stopEarly.isCompleted) {
-      final elapsedMs = DateTime.now().difference(_segmentStartedAt!).inMilliseconds;
-      _ref.read(debugStopReasonProvider.notifier).state = 'tempo máximo atingido (${elapsedMs}ms, teto '
-          '${_segmentDurationFor(mode).inSeconds}s) — silêncio nunca disparou. piso de ruído calibrado '
-          '${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado ${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)}, '
-          'amp. mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, menor densidade de voz vista na janela '
-          '${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}% (dispara em ${(_silenceVoiceFractionThreshold * 100).toStringAsFixed(0)}%)';
-    }
     _stopEarlySignal = null;
     if (!_sessionActive) return;
 
@@ -444,17 +403,9 @@ class ListenController extends StateNotifier<ListenState> {
     // amostras suficientes pra julgar a densidade.
     if (now.difference(_firstVoiceDetectedAt!) < _silenceDurationToStop) return;
 
-    final (voiceFraction, totalMs) = _computeVoiceDensity(now);
-    // TEMPORÁRIO
-    if (voiceFraction < _minVoiceFractionSeen) _minVoiceFractionSeen = voiceFraction;
+    final (voiceFraction, _) = _computeVoiceDensity(now);
 
     if (voiceFraction <= _silenceVoiceFractionThreshold) {
-      // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
-      final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
-      _ref.read(debugStopReasonProvider.notifier).state = 'silêncio detectado (${elapsedMs}ms desde o início, '
-          'densidade de voz na janela ${(voiceFraction * 100).toStringAsFixed(0)}% (janela cobriu ${totalMs}ms), '
-          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado '
-          '${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)})';
       stopEarly.complete();
     }
   }
@@ -495,16 +446,6 @@ class ListenController extends StateNotifier<ListenState> {
     if (state.mode != ListenMode.hum || state.status != ListenStatus.recording) return;
     final signal = _stopEarlySignal;
     if (signal != null && !signal.isCompleted) {
-      // TEMPORÁRIO — registra o motivo antes de completar o sinalizador.
-      final now = DateTime.now();
-      final elapsedMs = _segmentStartedAt != null ? now.difference(_segmentStartedAt!).inMilliseconds : -1;
-      final (currentVoiceFraction, currentTotalMs) = _computeVoiceDensity(now);
-      _ref.read(debugStopReasonProvider.notifier).state = 'toque manual (${elapsedMs}ms desde o início, última '
-          'amplitude ${_lastAmplitude.toStringAsFixed(2)} (suavizada ${(_smoothedAmplitude ?? -1).toStringAsFixed(2)}), '
-          'piso de ruído ${_noiseFloor.toStringAsFixed(2)}, nível de voz calibrado ${(_voiceLevelEstimate ?? -1).toStringAsFixed(2)}, '
-          'mín. vista ${_minAmplitudeSeen.toStringAsFixed(2)}, densidade de voz no momento do toque '
-          '${(currentVoiceFraction * 100).toStringAsFixed(0)}% (janela ${currentTotalMs}ms), menor densidade já '
-          'vista ${(_minVoiceFractionSeen * 100).toStringAsFixed(0)}%)';
       signal.complete();
     }
   }
@@ -516,15 +457,13 @@ class ListenController extends StateNotifier<ListenState> {
     await _amplitudeSub?.cancel();
     await _recorder.cancelRecording();
     state = const ListenState();
-    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
   }
 
   void reset() {
     state = ListenState(mode: state.mode);
-    _ref.read(debugStopReasonProvider.notifier).state = null; // TEMPORÁRIO
   }
 }
 
 final listenControllerProvider = StateNotifierProvider<ListenController, ListenState>((ref) {
-  return ListenController(ref.watch(audioRecorderProvider), ref.watch(apiClientProvider), ref);
+  return ListenController(ref.watch(audioRecorderProvider), ref.watch(apiClientProvider));
 });
