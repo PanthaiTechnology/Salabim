@@ -87,6 +87,34 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
     }
   }
 
+  static final _emojiPattern = RegExp(r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]', unicode: true);
+
+  /// Monta os spans de uma frase de "não encontrado" com o resto do texto na
+  /// opacidade reduzida de sempre (baseStyle) e só os emojis em opacidade
+  /// 100% (pedido do usuário) — nos dois modos, já que as duas frases
+  /// compartilhadas (_notFoundPhrase1) e as específicas de cada modo
+  /// (_notFoundPhraseListen2/_notFoundPhraseHum2) passam todas por aqui.
+  List<TextSpan> _notFoundSpans(String phrase, TextStyle baseStyle) {
+    final fullOpacityStyle = baseStyle.copyWith(color: AppColors.textPrimary);
+    final spans = <TextSpan>[];
+    final buffer = StringBuffer();
+    bool? bufferIsEmoji;
+    for (final rune in phrase.runes) {
+      final char = String.fromCharCode(rune);
+      final isEmoji = _emojiPattern.hasMatch(char);
+      if (bufferIsEmoji != null && isEmoji != bufferIsEmoji) {
+        spans.add(TextSpan(text: buffer.toString(), style: bufferIsEmoji ? fullOpacityStyle : baseStyle));
+        buffer.clear();
+      }
+      buffer.write(char);
+      bufferIsEmoji = isEmoji;
+    }
+    if (buffer.isNotEmpty) {
+      spans.add(TextSpan(text: buffer.toString(), style: bufferIsEmoji == true ? fullOpacityStyle : baseStyle));
+    }
+    return spans;
+  }
+
   // Tempo legível parado (opacidade máxima) antes de começar a sumir.
   static const _hintHoldDuration = Duration(milliseconds: 2200);
   // Duração do fade — usada tanto pro "sumir" quanto pro "aparecer"
@@ -543,11 +571,19 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
                       ),
                     ),
                   )
-                : Text(
-                    statusLabel,
-                    textAlign: TextAlign.center,
-                    style: statusTextStyle,
-                  ),
+                : state.status == ListenStatus.notFound
+                    // Só as frases de "não encontrado" (nos dois modos)
+                    // têm emoji — mantidos em opacidade 100%, o resto do
+                    // texto na opacidade reduzida de sempre.
+                    ? Text.rich(
+                        TextSpan(children: _notFoundSpans(statusLabel, statusTextStyle)),
+                        textAlign: TextAlign.center,
+                      )
+                    : Text(
+                        statusLabel,
+                        textAlign: TextAlign.center,
+                        style: statusTextStyle,
+                      ),
           ),
           // TEMPORÁRIO — diagnóstico do motivo/tempo em que a gravação do
           // Cantar parou (ver debugStopReasonProvider em app_providers.dart).
