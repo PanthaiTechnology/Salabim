@@ -321,6 +321,60 @@ quiser ir além):**
    resolveria precisão (durações maiores) e velocidade (fingerprint local)
    juntos.
 
+### 4.4 Investigação (pausada) — foco de áudio / prioridade do microfone
+
+Usuário notou algo real e reprodutível (14/ago/2026): tentar gravar a tela
+com o Gravador de Tela nativo (opção "Mídia e microfone") enquanto o Shazam
+ou o Gravador de Voz nativo estavam com o microfone aberto disparava o
+aviso do Android "Microfone em uso. Altere a configuração de som ou pare de
+usar o microfone." — o mesmo teste com o Salabim gravando **não disparou
+esse aviso**. Hipótese levantada: o Salabim estaria usando o microfone de
+um jeito que o Android trata com prioridade/exclusividade menor que Shazam
+e o gravador nativo.
+
+**Investigado, causa técnica provável encontrada, correção NÃO
+implementada (decisão explícita — ver "Status" abaixo):**
+
+- Não dá pra confirmar o que o Shazam usa por dentro (código fechado).
+- Pesquisa na documentação oficial do Android indica que `AudioSource.DEFAULT`
+  (o que o Salabim usa hoje, via `AndroidRecordConfig()` padrão) e
+  `AudioSource.MIC` são **praticamente equivalentes** — trocar de um pro
+  outro não deveria mudar o comportamento observado.
+- A causa mais provável, olhando o código-fonte do pacote `record`
+  (`AudioSessionManager.kt`): ele pede foco de áudio ao Android (via
+  `AudioFocusRequest`), mas com `setAcceptsDelayedFocusGain(true)` — um
+  pedido "educado", que aceita esperar a vez, ao contrário de um pedido de
+  foco exclusivo. É bem plausível que seja essa a diferença de
+  comportamento que o gravador de tela detectou.
+- **Esse comportamento está fixo dentro do código nativo (Kotlin) do
+  próprio pacote `record`** — não é algo configurável pela API que o
+  Flutter/Dart expõe. Corrigir de verdade exigiria fazer fork/remendar o
+  plugin Android (mexer em Kotlin nativo) ou escrever uma implementação
+  nativa própria só pra essa parte — investimento de engenharia parecido
+  em escala com a ponte nativa do SDK do ACRCloud (§4.3), não um ajuste de
+  configuração.
+
+**Isso afeta o SINAL captado?** Só quando existe disputa de verdade por
+outro app usando o microfone ao mesmo tempo. Segundo a documentação do
+Android, quando duas capturas concorrem, o sistema não bloqueia a de
+prioridade menor — ele **silencia** o áudio que chega pra ela (silêncio de
+verdade, não só mais baixo). Sem outro app disputando o microfone ao mesmo
+tempo (o caso normal de uso/teste do Salabim sozinho), não tem disputa pra
+resolver — o sinal captado deveria ser o mesmo independente da prioridade
+de foco. Ou seja: **provavelmente não é a causa principal do "precisa
+chegar perto"** nos testes normais, mas é um risco real e separado pra
+guardar — se um dia outro processo de áudio rodar em paralelo (assistente
+de voz sempre ouvindo em segundo plano, por exemplo), isso pode causar
+falhas "silenciosas" de verdade (áudio zerado, não só de baixa qualidade).
+
+**Status:** pausado a pedido do usuário — não implementado agora.
+Retomar só se: (a) suspeitar de conflito real de microfone em produção
+(ex: usuário relata falha consistente com algum assistente de voz ou app
+de gravação ativo em paralelo), ou (b) o investimento na ponte nativa do
+SDK do ACRCloud (§4.3) for adiante — nesse caso, a mesma ponte nativa
+poderia resolver os dois problemas juntos (fingerprint local + foco de
+áudio mais assertivo).
+
 ## 5. Fluxo de busca por texto (descrição / letra)
 
 1. `POST /v1/search/text` com `{ query, kind: "lyrics" | "description" }`.
