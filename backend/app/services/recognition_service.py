@@ -16,6 +16,7 @@ from app.core.cache import audio_fingerprint_key, get_cached_json, get_redis, se
 from app.models.schemas import ListenMode, PlatformLink, Track
 from app.services import (
     acrcloud_client,
+    acrcloud_fingerprint_client,
     audd_client,
     audio_utils,
     feedback_service,
@@ -250,6 +251,35 @@ async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | N
         # reconhecer, ao contrário do Shazam). Só no modo Ouvir por enquanto;
         # o Cantar (ACRCloud/melodia) não foi tocado.
         normalized_bytes = await audio_utils.normalize_gain(audio_bytes, input_format="m4a")
+
+        # Qual provedor faz o fingerprint em si é uma troca de configuração
+        # (Settings.listen_recognition_provider), não uma bifurcação de
+        # código — ver comentário lá. Em teste (14/ago/2026): candidato o
+        # motor de fingerprint "de música" do ACRCloud (projeto separado do
+        # de Humming), pra comparar com a AudD.
+        if get_settings().listen_recognition_provider == "acrcloud":
+            fp_result = await acrcloud_fingerprint_client.identify_audio(normalized_bytes)
+            if not fp_result:
+                return None
+            track = Track(
+                id=_stable_track_id(fp_result.isrc, fp_result.title, fp_result.artist),
+                title=fp_result.title,
+                artist=fp_result.artist,
+                album=fp_result.album,
+                isrc=fp_result.isrc,
+                release_date=fp_result.release_date,
+                matched_provider="acrcloud",
+                match_confidence=fp_result.score,
+            )
+            # O fingerprint do ACRCloud não traz capa/preview/links (só
+            # metadado) — mesmo reforço via iTunes que já usamos pra AudD e
+            # pro Cantar (ver _enrich_with_itunes).
+            track = await _enrich_with_itunes(track)
+            track.platform_links = await _resolve_platform_links(track.title, track.artist, isrc=track.isrc)
+            await set_cached_json(cache_key, track.model_dump())
+            await _save_track_cache(track, source_url=None, links_resolved=True)
+            return track
+
         result = await audd_client.identify_audio(normalized_bytes, filename="audio.wav")
         if not result:
             return None

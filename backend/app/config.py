@@ -16,6 +16,23 @@ class Settings(BaseSettings):
     acrcloud_access_key: str = ""
     acrcloud_access_secret: str = ""
 
+    # Projeto de fingerprint "de música" (Music Recognition) do ACRCloud —
+    # DIFERENTE do projeto de Humming acima (dois tipos de projeto
+    # separados no console deles, cada um com sua própria chave). Teste
+    # (14/ago/2026): candidato a substituir a AudD no modo Ouvir — ver
+    # acrcloud_fingerprint_client.py.
+    acrcloud_fingerprint_access_key: str = ""
+    acrcloud_fingerprint_access_secret: str = ""
+    acrcloud_fingerprint_host: str = "identify-eu-west-1.acrcloud.com"
+
+    # Qual provedor identifica o modo Ouvir agora. "audd" é o padrão —
+    # trocar pra "acrcloud" só depois que as chaves de fingerprint acima
+    # estiverem configuradas. Existe assim (variável de ambiente, não um
+    # if espalhado pelo código) justamente pra poder comparar os dois e
+    # voltar atrás na hora, sem precisar mudar/rebuildar nada — só trocar
+    # a variável no .env do servidor e reiniciar o container.
+    listen_recognition_provider: str = "audd"
+
     # Links cross-platform e letras
     odesli_api_key: str = ""
     musixmatch_api_key: str = ""
@@ -63,6 +80,9 @@ class Settings(BaseSettings):
         return {
             "audd": bool(self.audd_api_token),
             "acrcloud": bool(self.acrcloud_access_key and self.acrcloud_access_secret),
+            "acrcloud_fingerprint": bool(
+                self.acrcloud_fingerprint_access_key and self.acrcloud_fingerprint_access_secret
+            ),
             "odesli": True,  # funciona sem chave em baixo volume
             "musixmatch": bool(self.musixmatch_api_key),
             "spotify": bool(self.spotify_client_id and self.spotify_client_secret),
