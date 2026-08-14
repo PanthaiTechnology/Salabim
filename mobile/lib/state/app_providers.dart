@@ -92,12 +92,18 @@ class ListenController extends StateNotifier<ListenState> {
   /// se autoajusta por música sem precisar adivinhar limiar nenhum — casos
   /// fáceis confirmam cedo (1ª e 2ª tentativas já concordam), casos
   /// difíceis levam mais tentativas até duas baterem.
+  ///
+  /// Intervalos apertados entre as primeiras tentativas (14/ago/2026, a
+  /// pedido do usuário — a confirmação por concordância deixou a busca
+  /// mais lenta no caso fácil): 4s→6s (só +2s) em vez de 4s→8s (+4s) pra
+  /// confirmar mais rápido quando as 2 primeiras já concordam, sem abrir
+  /// mão de ter tentativas mais longas disponíveis pros casos difíceis.
   static const _listenSegmentDurations = [
     Duration(seconds: 4),
-    Duration(seconds: 8),
-    Duration(seconds: 12),
-    Duration(seconds: 16),
-    Duration(seconds: 20),
+    Duration(seconds: 6),
+    Duration(seconds: 9),
+    Duration(seconds: 13),
+    Duration(seconds: 18),
   ];
 
   /// Cantar usa 60s — não é mais um teto "normal" pra parar de gravar, e
