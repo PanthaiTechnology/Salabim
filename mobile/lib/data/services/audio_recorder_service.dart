@@ -62,6 +62,26 @@ class AudioRecorderService {
         encoder: useWav ? AudioEncoder.wav : AudioEncoder.aacLc,
         sampleRate: 44100,
         numChannels: 1,
+        // Teste (14/ago/2026): modo Ouvir precisava ficar bem perto da
+        // caixa de som pra reconhecer, ao contrário do Shazam — mesmo
+        // sintoma se repetiu com dois provedores de fingerprint diferentes
+        // (AudD e ACRCloud), o que aponta pra um problema na CAPTURA, não
+        // no provedor. A fonte de áudio padrão do Android
+        // (AndroidAudioSource.defaultSource, o que já estava sendo usado
+        // sem configurar nada) costuma ligar cancelamento de ruído/AGC
+        // pensado pra ligação de voz — que trata música de fundo como
+        // "ruído" a suprimir, exatamente o oposto do que queremos aqui.
+        // "camcorder" evita esse processamento orientado a voz (pensado
+        // pra gravar vídeo, então preserva o som ambiente como está) e,
+        // ao contrário de "unprocessed" (Android 7+, sem garantia de
+        // suporte em todo aparelho), é suportado desde as versões mais
+        // antigas do Android — mais seguro como mudança ampla. Só no modo
+        // Ouvir: o Cantar já passou por uma rodada extensa de calibração
+        // em cima do comportamento atual do microfone e não deve ser
+        // arriscado sem um teste dedicado à parte.
+        androidConfig: mode == ListenMode.listen
+            ? const AndroidRecordConfig(audioSource: AndroidAudioSource.camcorder)
+            : const AndroidRecordConfig(),
       ),
       path: path,
     );
