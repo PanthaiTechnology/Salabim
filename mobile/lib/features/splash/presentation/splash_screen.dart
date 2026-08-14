@@ -43,9 +43,11 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     duration: _duration,
   )..forward();
 
-  static const _wave1Window = Interval(0.00, 0.15, curve: Curves.easeOut);
-  static const _wave2Window = Interval(0.35, 0.50, curve: Curves.easeOut);
-  static const _wave3Window = Interval(0.70, 0.85, curve: Curves.easeOut);
+  // Agora começa em 0 tracinhos (não em 1): 0 -> 1 -> 1+2 -> 1+2+3, em 4
+  // estágios de tamanho parecido dentro dos mesmos 2s totais.
+  static const _wave1Window = Interval(0.20, 0.30, curve: Curves.easeOut);
+  static const _wave2Window = Interval(0.45, 0.55, curve: Curves.easeOut);
+  static const _wave3Window = Interval(0.70, 0.80, curve: Curves.easeOut);
 
   @override
   void initState() {
