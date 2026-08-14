@@ -305,6 +305,12 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: gradient,
+                  // Stroke interno, bem fininho e claro — um toque sutil que
+                  // "combina" com os anéis finos de fora (mesma cor branca,
+                  // mesma linguagem visual), só que por dentro do círculo
+                  // principal, presente nos dois modos e em todos os estados
+                  // do botão (parado, ouvindo, processando).
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.18), width: 1),
                   boxShadow: activelyListening
                       ? [
                           BoxShadow(
