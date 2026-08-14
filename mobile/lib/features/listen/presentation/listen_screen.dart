@@ -438,8 +438,16 @@ class _ListenScreenState extends ConsumerState<ListenScreen> with SingleTickerPr
       onTap: isRecording ? handleScreenTapWhileRecording : null,
       child: Column(
         children: [
-          const SizedBox(height: 24),
-          Image.asset('assets/icons/salabim_logo_lockup.png', height: 44, fit: BoxFit.contain),
+          // Só o texto "Salabim" agora, sem o ícone do mago — ele já
+          // aparece no botão central, ficava redundante mostrar duas vezes.
+          // Spacer (não mais um SizedBox fixo) tanto antes quanto depois:
+          // centraliza o texto no espaço vazio do topo, em vez de grudado
+          // lá em cima.
+          const Spacer(),
+          Text(
+            'Salabim',
+            style: GoogleFonts.baloo2(fontSize: 36, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          ),
           const Spacer(),
           // Mesmo raciocínio do botão: enquanto grava, o seletor de modo já
           // fica inerte de qualquer forma (controller.setMode ignora troca

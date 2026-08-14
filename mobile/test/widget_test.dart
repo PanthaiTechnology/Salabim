@@ -20,18 +20,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(milliseconds: 500));
 
-    // Identifica a logo da tela de escuta pelo asset (não só "algum Image"
-    // — durante a transição de rota os dois Images, capa e tela de
-    // escuta, podem coexistir por um instante).
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Image &&
-            widget.image is AssetImage &&
-            (widget.image as AssetImage).assetName == 'assets/icons/salabim_logo_lockup.png',
-      ),
-      findsOneWidget,
-    );
+    // Cabeçalho da tela de escuta: só o texto "Salabim" agora (o ícone saiu
+    // do topo, ficava redundante com o mesmo desenho já aparecendo no
+    // botão principal).
+    expect(find.text('Salabim'), findsOneWidget);
     // Ícone do botão principal (mesmo desenho do mago pros dois modos, só
     // muda quando grava/processa) — não é mais um Icon de fonte de ícones.
     expect(
