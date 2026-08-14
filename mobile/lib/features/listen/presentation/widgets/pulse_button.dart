@@ -55,15 +55,11 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
   double _wobblePhase = 0.0;
   double _wobble = 0.0;
 
-  // Animação de "ouvindo" (gravando de verdade, nos dois modos): o ícone do
-  // mago some e reaparece em loop (fade + leve encolhida, nunca some por
-  // completo — sempre mantém uma presença mínima) enquanto um arco gira ao
-  // redor dele, sincronizado no mesmo controller — uma rotação completa por
-  // respiração. Um único ciclo (0 -> 1) começa E termina com o ícone 100%
-  // visível (ver _listeningOpacity/_listeningScale abaixo), então o loop
-  // nunca "pisca" ou dá salto perceptível na costura entre uma repetição e
-  // a próxima. Reforça a identidade visual bem no momento em que o app está
-  // de fato "ouvindo/cantando" o usuário.
+  // Controller ligado/desligado enquanto o app está "ouvindo de verdade"
+  // (gravando, nos dois modos) — ver didUpdateWidget. Toca o _LoadingMark
+  // (os 3 traços de som acendendo um de cada vez): era a animação do
+  // "Processando", trocada de lugar com a de baixo a pedido do usuário —
+  // faz mais sentido "carregar" enquanto está de fato captando áudio.
   late final AnimationController _listeningController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1700),
@@ -79,13 +75,11 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
     TweenSequenceItem(tween: Tween(begin: 0.8, end: 1.0).chain(CurveTween(curve: Curves.easeInOutCubic)), weight: 50),
   ]);
 
-  // Animação de "Processando...": o botão volta a ficar visualmente
-  // "parado" (mesmo círculo com a pulsada leve de sempre, _idlePulse — nada
-  // de anéis reativos), e o ícone do mago "carrega" — os 3 traços de som
-  // saindo da boca acendem um de cada vez (traço 1 -> 1+2 -> 1+2+3), ficam
-  // completos um instante, e apagam juntos pra recomeçar. Por cima disso,
-  // o mago inteiro (corpo + traços) ganha uma respiração de opacidade bem
-  // sutil, nunca sumindo de verdade — só o suficiente pro olho perceber.
+  // Controller ligado/desligado enquanto o app está "Processando..." — ver
+  // didUpdateWidget. Toca o _ListeningMark (mago "respirando" com o arco
+  // girando ao redor): era a animação do "Ouvindo", trocada de lugar com a
+  // de cima a pedido do usuário — faz mais sentido "respirar" (sem
+  // carregar nada específico) enquanto está processando o resultado.
   late final AnimationController _loadingController = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 2000),
@@ -321,15 +315,22 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                     child: Center(
                       child: activelyListening
                           // Ouvindo de verdade (os dois modos): o mago
-                          // "respirando" com o arco girando ao redor — reforça a
-                          // identidade visual bem no momento em que o app está
-                          // de fato captando o usuário.
-                          ? _ListeningMark(controller: _listeningController)
+                          // "carregando" — os traços de som acendendo um a
+                          // um (era a animação do "Processando"; trocadas de
+                          // lugar a pedido do usuário). Continua tocada pelo
+                          // _listeningController, que já é o controller
+                          // ligado/desligado certo (repeat() durante
+                          // "ouvindo de verdade" — ver didUpdateWidget).
+                          ? _LoadingMark(controller: _listeningController)
                           : widget.isProcessing
                               // Processando: botão "parado" (mesmo círculo de
-                              // sempre) com o mago "carregando" — os traços de
-                              // som acendendo um a um.
-                              ? _LoadingMark(controller: _loadingController)
+                              // sempre) com o mago "respirando" e o arco
+                              // girando ao redor (era a animação do
+                              // "Ouvindo"; trocadas de lugar a pedido do
+                              // usuário). Tocada pelo _loadingController, que
+                              // já é o controller ligado/desligado certo
+                              // (repeat() durante "Processando...").
+                              ? _ListeningMark(controller: _loadingController)
                               // Ícone parado: o próprio mago da identidade visual,
                               // só o desenho branco (sem o fundo circular colorido
                               // original — ver assets/icons/salabim_mark_white.png)
