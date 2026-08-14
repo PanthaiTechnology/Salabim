@@ -341,13 +341,16 @@ class _PulseButtonState extends State<PulseButton> with TickerProviderStateMixin
                   ),
                   // Stroke interno, bem fininho e claro — um toque sutil que
                   // "combina" com os anéis finos de fora (mesma cor branca,
-                  // mesma linguagem visual), afastado da borda do círculo
-                  // (não colado nela), presente nos dois modos e em todos os
-                  // estados do botão (parado, ouvindo, processando).
+                  // mesma linguagem visual), bem rente à borda do círculo
+                  // principal (o usuário pediu pra inverter o afastamento
+                  // pra dentro que tinha sido aplicado antes — ficou mais
+                  // perto da borda do que a versão anterior), presente nos
+                  // dois modos e em todos os estados do botão (parado,
+                  // ouvindo, processando).
                   IgnorePointer(
                     child: Container(
-                      width: 170,
-                      height: 170,
+                      width: 180,
+                      height: 180,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1),
