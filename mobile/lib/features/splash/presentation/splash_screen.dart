@@ -21,7 +21,12 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
   static const _duration = Duration(seconds: 2);
   static const _circleSize = 280.0;
-  static const _markSize = _circleSize * 0.6; // mesma proporção usada no botão principal (108/180)
+  // Proporção medida direto no ícone oficial da logo (devops/assets/store/icon_512.png):
+  // largura do glifo ≈ 75% do diâmetro do círculo — bem maior que a
+  // proporção usada no botão principal (60%), que é deliberadamente menor
+  // pra caber os anéis decorativos ao redor. Aqui na capa não tem anel, e o
+  // usuário pediu pra respeitar o tamanho de verdade da logo oficial.
+  static const _markSize = _circleSize * 0.75;
 
   // Pulsada leve do círculo, idêntica à dos botões Ouvir/Cantar parados
   // (mesma duração de 2s, mesma amplitude de 6%).
