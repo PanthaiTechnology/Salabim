@@ -95,13 +95,12 @@ class ListenController extends StateNotifier<ListenState> {
   /// então um acerto na 1ª tentativa (curta) encerra a sessão na hora, sem
   /// esperar a 2ª.
   ///
-  /// 1ª tentativa reduzida de 6s pra 2s (14/ago/2026, a pedido do usuário —
-  /// 6s estava parecendo demorado demais pro caso fácil). Risco aceitável:
-  /// no teste controlado, 4s já dava "nada" (não "errado"), então 2s deve
-  /// se comportar igual (silêncio, não confusão) nos casos em que não é
-  /// suficiente — só teria menos chance de acertar de primeira num caso
-  /// fácil, sem ficar mais arriscado.
-  static const _listenSegmentDurations = [Duration(seconds: 2), Duration(seconds: 18)];
+  /// 1ª tentativa: testado 6s, depois 2s (14/ago/2026) — voltou pra 4s a
+  /// pedido do usuário, que é o valor original de antes de toda essa
+  /// rodada de ajuste e "aparentemente funcionava melhor". Continua dentro
+  /// da faixa validada como segura no teste controlado (4-8s = "nada", não
+  /// "errado").
+  static const _listenSegmentDurations = [Duration(seconds: 4), Duration(seconds: 18)];
 
   /// Cantar usa 60s — não é mais um teto "normal" pra parar de gravar, e
   /// sim um limite de segurança bem folgado: o pedido explícito é que a
