@@ -115,6 +115,7 @@ class AcrCloudBridge(private val activity: Activity) : IACRCloudListener {
     }
 
     override fun onVolumeChanged(volume: Double) {
+        Log.d(TAG, "onVolumeChanged: raw=$volume")
         activity.runOnUiThread {
             volumeSink?.success(volume)
         }

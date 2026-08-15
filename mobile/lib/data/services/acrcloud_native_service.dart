@@ -64,15 +64,22 @@ class AcrCloudNativeService {
     }
   }
 
-  /// Stream de amplitude (0.0-1.0), mesma normalização já usada pro áudio
-  /// via `record` (ver audio_recorder_service.dart) — TESTE: não temos
-  /// confirmação de que o volume que o SDK do ACRCloud manda usa a mesma
-  /// escala/unidade; pode precisar recalibrar depois de testar no
-  /// aparelho real (afeta só a animação da onda sonora, não o
-  /// reconhecimento em si).
+  /// Stream de amplitude (0.0-1.0).
+  ///
+  /// BUG encontrado em teste real (15/ago/2026): diferente do pacote
+  /// `record` (que manda dBFS negativo, tipo -45 a 0, daí a fórmula
+  /// `(raw+45)/45` em audio_recorder_service.dart), o SDK do ACRCloud já
+  /// manda o volume PRÉ-NORMALIZADO entre 0.0 e 1.0 (confirmado via log
+  /// real: valores tipo 0.63, 0.75, 0.80 durante gravação normal).
+  /// Aplicar a mesma fórmula de dBFS num valor que já é ~0.75 dava
+  /// (0.75+45)/45 ≈ 1.02, saturando em 1.0 sempre — por isso a animação
+  /// da onda sonora ficava travada no máximo o tempo todo no modo Ouvir
+  /// (nativo), diferente da animação do Cantar (que usa `record`, com a
+  /// fórmula certa pra ela). Aqui só precisa do clamp, sem a fórmula de
+  /// dBFS.
   Stream<double> get volume => _volumeChannel.receiveBroadcastStream().map((v) {
         final raw = (v as num).toDouble();
-        return ((raw + 45) / 45).clamp(0.0, 1.0);
+        return raw.clamp(0.0, 1.0);
       });
 
   Future<bool> init({required String host, required String accessKey, required String accessSecret}) async {
