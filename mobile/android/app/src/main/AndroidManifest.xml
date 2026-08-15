@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Exigidas pelo SDK do ACRCloud (branch de teste, ver
+         ARCHITECTURE.md §4.3/4.4) — mesmas permissões do demo oficial
+         deles (KotlinDemo/MainActivity.kt). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <application
         android:label="salabim"
         android:name="${applicationName}"

@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants.dart';
 import '../data/models/track.dart';
+import '../data/services/acrcloud_native_service.dart';
 import '../data/services/api_client.dart';
 import '../data/services/audio_recorder_service.dart';
 import '../data/services/history_service.dart';
@@ -14,6 +16,15 @@ final historyServiceProvider = Provider<HistoryService>((ref) => HistoryService(
 final audioRecorderProvider = Provider<AudioRecorderService>((ref) {
   final service = AudioRecorderService();
   ref.onDispose(service.dispose);
+  return service;
+});
+
+// Branch de teste da ponte nativa do SDK do ACRCloud (ver ARCHITECTURE.md
+// §4.3/4.4) — só usado pelo modo Ouvir nessa branch, Cantar continua no
+// caminho REST de sempre.
+final acrCloudNativeServiceProvider = Provider<AcrCloudNativeService>((ref) {
+  final service = AcrCloudNativeService();
+  ref.onDispose(service.release);
   return service;
 });
 
@@ -71,10 +82,13 @@ class ListenState {
 /// que QUALQUER trecho bater — sem precisar tocar de novo pra parar. O
 /// usuário só interage de novo se quiser cancelar antes da hora.
 class ListenController extends StateNotifier<ListenState> {
-  ListenController(this._recorder, this._api) : super(const ListenState());
+  ListenController(this._recorder, this._api, this._acrCloudNative) : super(const ListenState());
 
   final AudioRecorderService _recorder;
   final ApiClient _api;
+  // Branch de teste da ponte nativa do SDK do ACRCloud (ver
+  // ARCHITECTURE.md §4.3/4.4) — usado só pelo Ouvir nessa branch.
+  final AcrCloudNativeService _acrCloudNative;
 
   /// Ouvir: durações crescentes por tentativa. Mudança de estratégia
   /// (14/ago/2026, ver ARCHITECTURE.md §4.3) depois de confirmar com DOIS
@@ -289,7 +303,100 @@ class ListenController extends StateNotifier<ListenState> {
       attempt: 0,
       isProcessing: false,
     );
-    await _recordAndSearchSegment();
+    if (state.mode == ListenMode.hum) {
+      await _recordAndSearchSegment();
+    } else {
+      // Branch de teste (ver ARCHITECTURE.md §4.3/4.4): Ouvir usa o SDK
+      // on-device do ACRCloud em vez do caminho REST/AudD normal.
+      await _recordAndSearchListenNative();
+    }
+  }
+
+  /// Grava e busca o modo Ouvir via SDK on-device do ACRCloud — branch de
+  /// teste. O SDK deles é "tudo incluso" (grava + calcula fingerprint +
+  /// consulta, chama de volta quando termina) — não temos o mesmo
+  /// controle fino de checkpoints/concordância que construímos pro
+  /// caminho REST (`_recordAndSearchSegment`, mais abaixo, que continua
+  /// existindo intocado e é usado pelo Cantar). Só 1 "tentativa" no
+  /// sentido do app — quem decide quanto gravar é o SDK.
+  Future<void> _recordAndSearchListenNative() async {
+    if (!_sessionActive) return;
+
+    final initialized = await _acrCloudNative.init(
+      host: AppConstants.acrCloudHost,
+      accessKey: AppConstants.acrCloudAccessKey,
+      accessSecret: AppConstants.acrCloudAccessSecret,
+    );
+    if (!_sessionActive) return;
+    if (!initialized) {
+      _sessionActive = false;
+      state = state.copyWith(
+        status: ListenStatus.error,
+        errorMessage: 'Não foi possível iniciar o reconhecimento nativo (ACRCloud).',
+        isProcessing: false,
+      );
+      _reportListenSession('error', 0);
+      return;
+    }
+
+    final ampSub = _acrCloudNative.volume.listen((amp) {
+      if (_sessionActive) state = state.copyWith(amplitude: amp);
+    });
+
+    try {
+      final result = await _acrCloudNative.recognize();
+      if (!_sessionActive) {
+        await ampSub.cancel();
+        return;
+      }
+      state = state.copyWith(attempt: 1);
+
+      if (result == null) {
+        _sessionActive = false;
+        await ampSub.cancel();
+        state = state.copyWith(status: ListenStatus.notFound, isProcessing: false);
+        _reportListenSession('not_found', 1);
+        Future.delayed(const Duration(seconds: 5), () {
+          if (state.status == ListenStatus.notFound) reset();
+        });
+        return;
+      }
+
+      // Achou no reconhecimento nativo — só falta completar com o backend
+      // (capa/preview/links, via /v1/identify/enrich). Essa etapa aqui SIM
+      // a gente controla, então "processando" reflete de verdade.
+      state = state.copyWith(isProcessing: true);
+
+      final track = await _api.enrichTrack(
+        title: result.title,
+        artist: result.artist,
+        album: result.album,
+        isrc: result.isrc,
+        matchConfidence: result.score,
+      );
+      if (!_sessionActive) {
+        await ampSub.cancel();
+        return;
+      }
+
+      _sessionActive = false;
+      await ampSub.cancel();
+      state = state.copyWith(status: ListenStatus.idle, result: track, isProcessing: false);
+      _reportListenSession('found', 1);
+    } catch (e) {
+      if (!_sessionActive) {
+        await ampSub.cancel();
+        return;
+      }
+      _sessionActive = false;
+      await ampSub.cancel();
+      state = state.copyWith(
+        status: ListenStatus.error,
+        errorMessage: 'Não foi possível completar a busca agora. Verifica sua internet.',
+        isProcessing: false,
+      );
+      _reportListenSession('error', 1);
+    }
   }
 
   Future<void> _recordAndSearchSegment() async {
@@ -545,6 +652,12 @@ class ListenController extends StateNotifier<ListenState> {
     _reportListenSession('cancelled', state.attempt);
     await _amplitudeSub?.cancel();
     await _recorder.cancelRecording();
+    // Branch de teste (ver ARCHITECTURE.md §4.3/4.4): se o Ouvir nativo
+    // estava em andamento, isso desbloqueia o `await recognize()` em
+    // _recordAndSearchListenNative (resolve com null), que faz a limpeza
+    // do resto sozinho. Chamar mesmo fora desse caminho é inofensivo — o
+    // lado nativo trata cancelar sem nada rodando como no-op.
+    await _acrCloudNative.cancel();
     state = const ListenState();
   }
 
@@ -554,5 +667,9 @@ class ListenController extends StateNotifier<ListenState> {
 }
 
 final listenControllerProvider = StateNotifierProvider<ListenController, ListenState>((ref) {
-  return ListenController(ref.watch(audioRecorderProvider), ref.watch(apiClientProvider));
+  return ListenController(
+    ref.watch(audioRecorderProvider),
+    ref.watch(apiClientProvider),
+    ref.watch(acrCloudNativeServiceProvider),
+  );
 });

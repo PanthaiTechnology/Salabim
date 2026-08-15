@@ -70,6 +70,19 @@ class ListenSessionReport(BaseModel):
     total_ms: int = Field(..., ge=0)
 
 
+class EnrichTrackRequest(BaseModel):
+    """Metadado já identificado por fora (SDK on-device do ACRCloud —
+    branch de teste, ver ARCHITECTURE.md §4.3/4.4) que só precisa ser
+    completado com capa/preview/links — ver
+    recognition_service.enrich_track_from_metadata."""
+
+    title: str
+    artist: str
+    album: str | None = None
+    isrc: str | None = None
+    match_confidence: float | None = None
+
+
 class FeedbackRequest(BaseModel):
     """Feedback do usuário sobre um resultado: confirma se está certo, ou
     informa o nome real quando está errado. Vira uma correção persistente

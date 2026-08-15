@@ -11,6 +11,19 @@ class AppConstants {
 
   static const int maxRecordingSeconds = 12;
   static const int minRecordingSeconds = 3;
+
+  // Credenciais do SDK on-device do ACRCloud — branch de teste (ver
+  // ARCHITECTURE.md §4.3/4.4). Mesmo projeto/chave já usado pelo Cantar
+  // via REST (acrcloud_client.py no backend) — não é secreto de verdade
+  // no sentido estrito (fica embutido no APK, extraível por quem
+  // decompilar), mas passar via --dart-define em vez de hardcoded no
+  // fonte evita deixar a chave craquestada direto no código versionado.
+  static const String acrCloudHost = String.fromEnvironment(
+    'ACRCLOUD_HOST',
+    defaultValue: 'identify-us-west-2.acrcloud.com',
+  );
+  static const String acrCloudAccessKey = String.fromEnvironment('ACRCLOUD_ACCESS_KEY');
+  static const String acrCloudAccessSecret = String.fromEnvironment('ACRCLOUD_ACCESS_SECRET');
 }
 
 enum StreamingPlatform {

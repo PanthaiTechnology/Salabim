@@ -239,6 +239,38 @@ async def _prefer_canonical_version(track: Track) -> Track:
     return track
 
 
+async def enrich_track_from_metadata(
+    *,
+    title: str,
+    artist: str,
+    album: str | None = None,
+    isrc: str | None = None,
+    matched_provider: str = "acrcloud",
+    match_confidence: float | None = None,
+) -> Track:
+    """Monta um Track completo (capa/preview via iTunes, links
+    cross-platform via Odesli/Spotify) a partir de metadado que JÁ veio
+    identificado de fora — usado pelo caminho nativo do SDK do ACRCloud
+    (branch de teste, ver ARCHITECTURE.md §4.3/4.4): o reconhecimento em
+    si (fingerprint + consulta) já aconteceu no aparelho, aqui só
+    completamos o resto que a tela de resultado precisa, reaproveitando o
+    mesmo enriquecimento que os outros caminhos (AudD, ACRCloud REST) já
+    usam — ver _enrich_with_itunes/_resolve_platform_links acima."""
+    track = Track(
+        id=_stable_track_id(isrc, title, artist),
+        title=title,
+        artist=artist,
+        album=album,
+        isrc=isrc,
+        matched_provider=matched_provider,
+        match_confidence=match_confidence,
+    )
+    track = await _enrich_with_itunes(track)
+    track.platform_links = await _resolve_platform_links(track.title, track.artist, isrc=track.isrc)
+    await _save_track_cache(track, source_url=None, links_resolved=True)
+    return track
+
+
 async def identify_from_audio(audio_bytes: bytes, mode: ListenMode) -> Track | None:
     cache_key = audio_fingerprint_key(audio_bytes, mode.value)
     cached = await get_cached_json(cache_key)

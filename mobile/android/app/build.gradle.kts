@@ -71,3 +71,12 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// SDK do ACRCloud (branch de teste — ponte nativa, ver ARCHITECTURE.md
+// §4.3/4.4). Não é uma dependência Maven/JitPack — vem como .jar (baixado
+// de github.com/acrcloud/ACRCloudUniversalSDK/libs) em app/libs/, mais as
+// bibliotecas nativas (.so) por ABI em app/src/main/jniLibs/<abi>/
+// (convenção padrão do Gradle, pega automático, sem config extra aqui).
+dependencies {
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
+}

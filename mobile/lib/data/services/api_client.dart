@@ -53,6 +53,29 @@ class ApiClient {
     }
   }
 
+  /// Completa um resultado que já veio identificado de fora (SDK
+  /// on-device do ACRCloud — branch de teste, ver ARCHITECTURE.md
+  /// §4.3/4.4) com capa/preview/links, chamando POST /v1/identify/enrich.
+  /// Diferente de [identify]: aqui o reconhecimento em si JÁ aconteceu
+  /// (no aparelho), isso só completa o resto que a tela de resultado
+  /// precisa.
+  Future<Track> enrichTrack({
+    required String title,
+    required String artist,
+    String? album,
+    String? isrc,
+    double? matchConfidence,
+  }) async {
+    final response = await _dio.post('/v1/identify/enrich', data: {
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'isrc': isrc,
+      'match_confidence': matchConfidence,
+    });
+    return Track.fromJson(response.data as Map<String, dynamic>);
+  }
+
   /// Busca por trecho de letra ou descrição livre da música.
   Future<List<Track>> searchText({required String query, required TextSearchKind kind}) async {
     try {
