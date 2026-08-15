@@ -322,6 +322,26 @@ class ListenController extends StateNotifier<ListenState> {
   Future<void> _recordAndSearchListenNative() async {
     if (!_sessionActive) return;
 
+    // BUG encontrado em teste real (14/ago/2026): esse caminho pula o
+    // AudioRecorderService (usado pelo REST/Cantar), que é quem hoje pede a
+    // permissão de microfone via permission_handler — o SDK do ACRCloud não
+    // pede sozinho, só falha calado (AudioRecord com status -1) se não
+    // tiver. Sem isso, qualquer instalação nova do app trava aqui pra
+    // sempre em "não encontrado", sem o usuário nunca ver o diálogo do
+    // Android pedindo o microfone.
+    final hasPermission = await _recorder.hasPermission();
+    if (!_sessionActive) return;
+    if (!hasPermission) {
+      _sessionActive = false;
+      state = state.copyWith(
+        status: ListenStatus.error,
+        errorMessage: 'Precisamos da permissão do microfone para identificar a música.',
+        isProcessing: false,
+      );
+      _reportListenSession('error', 0);
+      return;
+    }
+
     final initialized = await _acrCloudNative.init(
       host: AppConstants.acrCloudHost,
       accessKey: AppConstants.acrCloudAccessKey,

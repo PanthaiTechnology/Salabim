@@ -1,9 +1,12 @@
 package com.salabim.salabim
 
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+
+private const val TAG = "AcrCloudBridge"
 
 /// Branch de teste da ponte nativa do SDK do ACRCloud (ver
 /// ARCHITECTURE.md §4.3/4.4) — primeiro código nativo custom do projeto
@@ -24,6 +27,7 @@ class MainActivity : FlutterActivity() {
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName)
         methodChannel = channel
         channel.setMethodCallHandler { call, result ->
+            Log.d(TAG, "MethodChannel recebeu: ${call.method}")
             when (call.method) {
                 "init" -> {
                     val host = call.argument<String>("host") ?: ""
