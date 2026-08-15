@@ -464,6 +464,30 @@ real; validando com mais rodadas antes de decidir merge pro `main`. Sem plano
 de reduzir os 12s de novo ou tentar streaming de novo sem uma ideia
 estruturalmente diferente (não só "cópia em paralelo").
 
+**Ideia futura (14/ago/2026, NÃO iniciada) — usar essa mesma ponte pro
+Cantar também:** é literalmente o mesmo projeto/motor ACRCloud que o
+Cantar já usa via REST hoje (Cover Song/Humming) — em vários testes desse
+branch o SDK devolveu resultado via `metadata.humming[]` mesmo pra áudio
+tocado, então o `AcrCloudBridge` já "fala" com esse motor, só nunca foi
+testado com canto/assobio de verdade. Antes de tentar, resolver 3
+diferenças reais (não é só trocar o modo):
+1. **Duração** — Cantar grava até 60s fixos hoje; o SDK por padrão só vai
+   até `recordOnceMaxTimeMS` (12000ms) — precisaria configurar um valor
+   maior especificamente pro modo Cantar.
+2. **Detecção de silêncio** — toda a afinação feita hoje (parar de gravar
+   em silêncio/tosse, ver início desta seção 4) vive no código Dart via
+   pacote `record`; o SDK tem mecanismo próprio de silêncio
+   (`muteThreshold`/`recMuteMaxTimeMS`), diferente e não testado pra
+   canto.
+3. **Transcrição por Whisper** (`ENABLE_HUM_TRANSCRIPTION`, backend) — se
+   ainda for usada pra ajudar a identificar, precisa do áudio bruto no
+   servidor de qualquer forma, o que reduziria o ganho de velocidade de
+   ir pro caminho on-device.
+
+Não iniciar sem decisão explícita — o Cantar já está funcionando bem e
+bastante afinado; só vale mexer depois que o caminho nativo do Ouvir
+estiver validado e estável.
+
 ## 5. Fluxo de busca por texto (descrição / letra)
 
 1. `POST /v1/search/text` com `{ query, kind: "lyrics" | "description" }`.
