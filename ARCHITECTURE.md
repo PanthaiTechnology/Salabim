@@ -375,6 +375,63 @@ SDK do ACRCloud (§4.3) for adiante — nesse caso, a mesma ponte nativa
 poderia resolver os dois problemas juntos (fingerprint local + foco de
 áudio mais assertivo).
 
+### 4.5 Ponte nativa Android pro SDK on-device do ACRCloud (14/ago/2026, EM TESTE)
+
+Branch `feature/acrcloud-native-sdk` (não mergeada no `main`, não publicada
+na Play Store — build debug local + `flutter install`/sideload pra
+iteração rápida). Objetivo: resolver §4.3 (velocidade — fingerprint
+calculado no aparelho, sem upload) e §4.4 (foco de microfone) de uma vez,
+usando o `ACRCloudUniversalSDK` (jar + `.so` por ABI, `app/libs/` e
+`app/src/main/jniLibs/`) via `MethodChannel`/`EventChannel` custom
+(`AcrCloudBridge.kt` + `MainActivity.kt`) em vez do pacote `record`.
+
+**Confirmado funcionando:**
+- Fingerprint on-device + consulta ao ACRCloud, ponta a ponta, com capa/
+  preview/links completando via `POST /v1/identify/enrich` (novo endpoint,
+  reaproveita `_enrich_with_itunes`/`_resolve_platform_links`).
+- O aviso "Microfone em uso" do Android **passou a aparecer** com esse
+  caminho (não aparecia com o pacote `record`, ver §4.4) — confirma que o
+  pedido de foco de áudio nativo é mais parecido com o do Shazam.
+- Amostra pequena (9 tentativas, várias músicas, 14/ago/2026): ~6-7 de 9
+  corretas. Não é 100%, mas nenhuma duração é "segura" mesmo — consistente
+  com a lição do §4.3.
+
+**Bugs reais encontrados e corrigidos nesse teste (não são do SDK em si,
+são do nosso código de ponte):**
+1. `_recordAndSearchListenNative` pulava `AudioRecorderService.hasPermission()`
+   — numa instalação nova, o SDK falhava calado (`AudioRecord` status -1,
+   sem nunca pedir a permissão pro usuário). Corrigido: pede a permissão
+   antes, igual ao caminho REST.
+2. `parseResult()` só olhava `metadata.music[]` — esse projeto (motor
+   combinado, mesmo do Cantar) às vezes devolve o match em
+   `metadata.humming[]` mesmo pra áudio tocado (não cantarolado).
+   Corrigido: checa os dois.
+
+**Testado e revertido (não usar de novo sem dado novo que justifique):**
+- `recorderConfig.recordOnceMaxTimeMS` reduzido de 12000 (padrão do SDK,
+  não documentado — achado inspecionando o `.jar`) pra 6000: piorou,
+  voltou a acertar errado com confiança. Esse caminho não tem o mecanismo
+  de concordância entre tentativas que o REST tem (§4.3), então fica mais
+  exposto a esse risco já mapeado.
+- **Streaming progressivo** ("fotos" a cada 2s via `acrcloudRecordDataListener`
+  + `ACRCloudClient.recognize()` manual num client separado, aceitando só
+  se concordar com alguma tentativa anterior da sessão — mesma regra do
+  `_listenCandidates` do REST): implementado e testado, **piorou muito**
+  (de ~2/3 pra ~1/6 de acerto no resultado final). A checagem manual
+  nunca achou nada sozinha (sempre `found=false`, até com 11s
+  acumulados), e o resultado "oficial" dos 12s também piorou — hipótese:
+  rodar um segundo `ACRCloudClient` + o gancho de cópia de áudio em
+  paralelo disputa recurso com a captura/fingerprint principal e degrada
+  a qualidade do sinal. Revertido pro commit `5aeade6`. Mesma categoria
+  de risco que a tentativa de streaming contínuo do lado REST (§4.3) —
+  **captura de áudio + processamento em paralelo, nesse projeto, parece
+  degradar a qualidade de forma difícil de prever sem testar no aparelho
+  real toda vez.**
+
+**Status:** validando com mais testes reais antes de decidir merge pro
+`main`. Sem plano de reduzir os 12s de novo ou tentar streaming de novo
+sem uma ideia estruturalmente diferente (não só "cópia em paralelo").
+
 ## 5. Fluxo de busca por texto (descrição / letra)
 
 1. `POST /v1/search/text` com `{ query, kind: "lyrics" | "description" }`.
