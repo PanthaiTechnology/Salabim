@@ -277,6 +277,18 @@ das datas citadas):**
 | `AndroidAudioSource.camcorder` no lugar da fonte padrão do microfone (evita AGC/cancelamento de ruído pensado pra chamada de voz, que trata música de fundo como "ruído" a suprimir) | Piorou no teste em aparelho real | Revertido (voltou pra `AndroidAudioSource.defaultSource`) |
 | Segmento de gravação de 4s → 7s (mais contexto por tentativa, menos tentativas) | Taxa de acerto caiu pra 11% (medido, não "achismo" — ver métrica abaixo) | Revertido (voltou pra 4s / 5 tentativas) |
 
+**Nota tardia (14/ago/2026) sobre a linha do ACRCloud fingerprint acima:**
+na época, achávamos que o teste era "sujo" só por causa do motor combinado.
+Descoberta mais tarde (ver §4.5): o projeto do ACRCloud estava configurado
+com o "Audio Engine" em **só** Cover Song/Humming — ou seja, esse teste
+antigo rodou com Fingerprinting **desligado por completo**, não só
+"misturado" com Humming. O resultado ruim registrado ali pode ter sido
+100% causado por isso, não pela distância/precisão do motor de
+fingerprint em si (nunca chegou a rodar). Não foi re-testado via REST
+depois da correção — o motor combinado agora está ligado, então se
+`listen_recognition_provider` for reativado no futuro, vale re-medir do
+zero antes de tirar qualquer conclusão nova.
+
 **Infraestrutura de medição criada nesse processo** (pra parar de comparar
 mudança "por sensação" de teste manual): `backend/app/services/recognition_metrics.py`
 cronometra cada tentativa de identify (Ouvir e Cantar) e grava evento
@@ -310,11 +322,15 @@ quiser ir além):**
 1. Checar a métrica real (`GET /v1/debug/identify-stats?mode=listen`) depois
    de alguns dias de uso — confirmar com número se 6s/18s resolveu de
    verdade, não só nesse teste pontual.
-2. Se quiser testar o ACRCloud de forma justa: precisa de um projeto
-   **separado** (não combinado com o de Humming do Cantar) configurado só
-   com o engine "Audio Fingerprinting" — a conta trial atual não permite
-   (limite de 1 projeto); exigiria contato com o suporte deles ou plano
-   pago.
+2. ~~Se quiser testar o ACRCloud de forma justa: precisa de um projeto
+   separado...~~ **CORRIGIDO (14/ago/2026):** não precisava de projeto
+   novo nem plano pago — o projeto único da conta trial tem um campo
+   "Audio Engine" no painel do ACRCloud com 3 opções (Audio
+   Fingerprinting / Fingerprinting + Humming combinado / só Humming) e
+   estava configurado em **"só Cover Song (Humming) Identification"**,
+   sem Fingerprinting nenhum ligado. Trocado pra "Audio Fingerprinting &
+   Cover Song (Humming) Identification" (o combinado) no painel deles —
+   resolveu na hora, ver §4.5.
 3. Só depois de confirmar que o motor do ACRCloud é preciso o suficiente
    isoladamente, vale considerar o investimento na ponte nativa do SDK
    on-device (item anterior) pra também ganhar velocidade — nesse ponto já
@@ -428,9 +444,25 @@ são do nosso código de ponte):**
   degradar a qualidade de forma difícil de prever sem testar no aparelho
   real toda vez.**
 
-**Status:** validando com mais testes reais antes de decidir merge pro
-`main`. Sem plano de reduzir os 12s de novo ou tentar streaming de novo
-sem uma ideia estruturalmente diferente (não só "cópia em paralelo").
+**Causa raiz encontrada pra taxa de acerto ruim em condições difíceis
+(14/ago/2026):** teste comparativo direto contra o Shazam, mesmas
+condições (volume baixo, janela aberta, ventilador ligado) — Shazam
+acertava tudo, a ponte nativa errava quase tudo, sempre via
+`metadata.humming[]`. Causa: o projeto do ACRCloud (painel deles, campo
+"Audio Engine") estava configurado em **só "Cover Song (Humming)
+Identification"** — o Fingerprinting (algoritmo tipo Shazam, robusto a
+ruído) nunca chegou a rodar pra áudio tocado, só o motor de melodia
+(sensível a ruído por natureza). Trocado no painel pra **"Audio
+Fingerprinting & Cover Song (Humming) Identification"** (existe no mesmo
+projeto, sem precisar de conta nova nem plano pago — não era limitação
+da conta trial como se pensava antes, ver correção em §4.3). Resultado
+imediato: resultado passou a vir de `metadata.music[]` (fingerprinting de
+verdade) e acertou no mesmo teste difícil que antes errava sistematicamente.
+
+**Status:** correção do motor aplicada e confirmada num primeiro teste
+real; validando com mais rodadas antes de decidir merge pro `main`. Sem plano
+de reduzir os 12s de novo ou tentar streaming de novo sem uma ideia
+estruturalmente diferente (não só "cópia em paralelo").
 
 ## 5. Fluxo de busca por texto (descrição / letra)
 
